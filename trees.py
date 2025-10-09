@@ -49,11 +49,38 @@ class Node:
             return self.left_child.evaluate(inputs)
         else:
             return self.right_child.evaluate(inputs)
+    
+    def get_depth(self):
+        # base case of recursion
+        if self.action is not None:
+            return 1
+        
+        return 1 + max(self.left_child.get_depth(), self.right_child.get_depth())
 
 
 class DecisionTree:
     def __init__(self, root_node=None):
         self.root_node = root_node
+
+        # keep track of how deep the tree extends
+        if root_node is None:
+            self.depth = -1
+        else:
+            self.depth = self.root_node.get_depth()
+
+        # set up a dictionary that describes the nodes at each level of the tree for easy reference
+        node_dictionary = {0: [self.root_node]}
+        for i in range(1, self.depth):
+            node_dictionary[i] = []
+            # get a list of all the nodes higher up in the dictionary
+            nodes_one_level_higher = node_dictionary[i-1]
+            for parent in nodes_one_level_higher:
+                if parent.action is None:
+                    node_dictionary[i].append(parent.left_child)
+                    node_dictionary[i].append(parent.right_child)
+        
+        self.directory = node_dictionary
+
 
     def evaluate(self, inputs):
         return self.root_node.evaluate(inputs)
@@ -73,7 +100,7 @@ def generate_new_decision_node():
 def copy_node(target_node):
     # base case for recursion
     if target_node.action is not None:
-        return Node(target_node.action)
+        return Node(action=target_node.action)
     else:
         decision_var = target_node.decision_var
         threshold = target_node.threshold
@@ -82,3 +109,13 @@ def copy_node(target_node):
         
         return Node(decision_var=decision_var, threshold=threshold,
                     left_child=left_child, right_child=right_child)
+
+def mate_trees(Tree1, Tree2):
+    depth_to_search = min(Tree1.depth, Tree2.depth)
+    for d in range(0, depth_to_search):
+        tree1_candidates = Tree1.directory[d]
+        tree2_candidates = Tree2.directory[d]
+        for i, Node1 in enumerate(tree1_candidates):
+            for j, Node2 in enumerate(tree2_candidates):
+                if Node1.decision_var == Node2.decision_var:
+                    pass
