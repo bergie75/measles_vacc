@@ -70,25 +70,26 @@ class Node:
         # base case of recursion
         if self.action is not None:
             return 1
+        elif self.decision_var is None:
+            return -1
         
         return 1 + max(self.left_child.get_depth(), self.right_child.get_depth())
-
 
 class DecisionTree:
     def __init__(self, root_node=None):
         self.root_node = root_node
-
-        # keep track of how deep the tree extends
-        if root_node is None:
-            self.depth = -1
-        else:
-            self.depth = self.root_node.get_depth()
-
-        # set up a dictionary that describes the nodes at each level of the tree for easy reference
+        # calculates the current depth of the tree and initializes
+        # a coordinate representation of the tree for later use
+        self.update_directory_and_depth()
+    
+    def evaluate(self, inputs):
+        return self.root_node.evaluate(inputs)
+    
+    def update_directory_and_depth(self):
+        new_depth = self.root_node.get_depth()
         node_dictionary = {0: [self.root_node]}
-        for i in range(1, self.depth):
+        for i in range(1, new_depth):
             node_dictionary[i] = []
-            # get a list of all the nodes higher up in the dictionary
             nodes_one_level_higher = node_dictionary[i-1]
             for parent in nodes_one_level_higher:
                 if parent.action is None:
@@ -96,37 +97,16 @@ class DecisionTree:
                     node_dictionary[i].append(parent.right_child)
         
         self.directory = node_dictionary
-    
-    def evaluate(self, inputs):
-        return self.root_node.evaluate(inputs)
+        self.depth = new_depth
     
     def set_by_coordinates(self, depth, index, attribute_name, attribute_value):
+        # the part that actually changes the nodes that make up the tree
         self.directory[depth][index].__setattr__(attribute_name, attribute_value)
+
+        # if children are changed, the directory needs to be recalculated. May be more efficient way
+        # to do this. Currently reuses code from initialization
         if attribute_name == "left_child" or attribute_name == "right_child":
-            # set up a dictionary that describes the nodes at each level of the tree for easy reference
-            new_depth = self.root_node.get_depth()
-            node_dictionary = {0: [self.root_node]}
-            for i in range(1, new_depth):
-                node_dictionary[i] = []
-                # get a list of all the nodes higher up in the dictionary
-                nodes_one_level_higher = node_dictionary[i-1]
-                for parent in nodes_one_level_higher:
-                    if parent.action is None:
-                        node_dictionary[i].append(parent.left_child)
-                        node_dictionary[i].append(parent.right_child)
-            
-            self.directory = node_dictionary
-
-# used for mutation if node is currently a terminal leaf
-def generate_new_decision_node():
-    rng = np.random.default_rng()
-    decision_var, range = random.choice(list(input_threshold_ranges.items()))
-    threshold = rng.uniform(low=range[0], high=range[1])
-
-    left_child = Node(action=random.choice(action_set))
-    right_child = Node(action=random.choice(action_set))
-
-    return Node(decision_var=decision_var, threshold=threshold, left_child=left_child, right_child=right_child)
+            self.update_directory_and_depth()
 
 # a helper to avoid cloning by reference when mating trees
 def copy_node(target_node):
@@ -145,9 +125,24 @@ def copy_node(target_node):
 def copy_tree(target_tree):
     return DecisionTree(root_node=copy_node(target_tree.root_node))  # to avoid cloning by reference
 
+# finds possible points where trees can exchange branches
+def find_mating_points(Tree1, Tree2):
+    min_depth = min(Tree1.depth, Tree2.depth)
+    mating_points = []
+    
+    for d in range(0, min_depth):
+        for index1, Node1 in enumerate(Tree1.directory[d]):
+            dec_var = Node1.decision_var
+            # exclude leaf notes from list of possible joins
+            if dec_var is not None:
+                mating_points += [[d, index1, index2] for index2, Node2 in enumerate(Tree2.directory[d]) if  Node2.decision_var==dec_var]
+    
+    return mating_points
+
 # assumes you are handing a valid branch point from both trees parametrized
-# by depth and indices
-def mate_trees(Tree1, Tree2, depth, index1, index2):
+# by depth and indices, e.g. by calling find_mating_points and selecting
+# a random results
+def mate_trees_at_coordinates(Tree1, Tree2, depth, index1, index2):
     # trees must be new objects to avoid reference mistakes
     Variant1 = copy_tree(Tree1)
     Variant2 = copy_tree(Tree2)
@@ -166,3 +161,31 @@ def mate_trees(Tree1, Tree2, depth, index1, index2):
     Variant2.set_by_coordinates(depth, index2, "threshold", mean_threshold)
 
     return Variant1, Variant2
+
+# uses the preceeding two functions to mate two trees. Note that there will be a bias towards mating
+# trees using nodes closer to the leaves, even though that hasn't been explicitly programmed.
+# Choosing a mate point uniformly at random causes this, since there will be more by chance lower down
+def mate_trees(Tree1, Tree2):
+    mating_points = find_mating_points(Tree1, Tree2)
+    # there might not be any matching points
+    if len(mating_points) > 0:
+        random_mate_index = np.random.choice(range(0, len(mating_points)))
+        random_mate_point = mating_points[random_mate_index]
+
+        return mate_trees_at_coordinates(Tree1, Tree2, *random_mate_point)
+
+def grow_random_tree(depth, grow_probability=1):
+    # DO NOT COMBINE FIRST TWO LINES. It doesn't work, I don't know why
+    root_node = Node()
+    root_node.mutate_into_decision_node()
+    dec_tree = DecisionTree(root_node=root_node)
+    rng = np.random.default_rng()
+    while dec_tree.depth < depth:
+        current_leaves = dec_tree.directory[dec_tree.depth-1]
+        for leaf in current_leaves:
+            if rng.uniform() <= grow_probability:
+                leaf.mutate_into_decision_node()
+        # only update directory at the end of the loop to save time
+        dec_tree.update_directory_and_depth()
+    
+    return dec_tree
