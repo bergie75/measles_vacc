@@ -38,6 +38,22 @@ class Node:
         if input_threshold_ranges[self.decision_var][0] <= candidate_value <= input_threshold_ranges[self.decision_var][0]:
             self.threshold = candidate_value
     
+    # transforms a node from a leaf to a decision node with two children
+    # can be used to grow a tree
+    def mutate_into_decision_node(self):
+        rng = np.random.default_rng()
+        decision_var, range = random.choice(list(input_threshold_ranges.items()))
+        threshold = rng.uniform(low=range[0], high=range[1])
+
+        left_child = Node(action=random.choice(action_set))
+        right_child = Node(action=random.choice(action_set))
+
+        self.action = None
+        self.decision_var = decision_var
+        self.threshold = threshold
+        self.left_child = left_child
+        self.right_child = right_child
+
     # inputs will be in the form of a dictionary {str(name_decision_var): float(value_of_the_variable)}
     def evaluate(self, inputs):
         # terminal condition to end the recursion
@@ -80,11 +96,27 @@ class DecisionTree:
                     node_dictionary[i].append(parent.right_child)
         
         self.directory = node_dictionary
-
-
+    
     def evaluate(self, inputs):
         return self.root_node.evaluate(inputs)
     
+    def set_by_coordinates(self, depth, index, attribute_name, attribute_value):
+        self.directory[depth][index].__setattr__(attribute_name, attribute_value)
+        if attribute_name == "left_child" or attribute_name == "right_child":
+            # set up a dictionary that describes the nodes at each level of the tree for easy reference
+            new_depth = self.root_node.get_depth()
+            node_dictionary = {0: [self.root_node]}
+            for i in range(1, new_depth):
+                node_dictionary[i] = []
+                # get a list of all the nodes higher up in the dictionary
+                nodes_one_level_higher = node_dictionary[i-1]
+                for parent in nodes_one_level_higher:
+                    if parent.action is None:
+                        node_dictionary[i].append(parent.left_child)
+                        node_dictionary[i].append(parent.right_child)
+            
+            self.directory = node_dictionary
+
 # used for mutation if node is currently a terminal leaf
 def generate_new_decision_node():
     rng = np.random.default_rng()
@@ -110,12 +142,27 @@ def copy_node(target_node):
         return Node(decision_var=decision_var, threshold=threshold,
                     left_child=left_child, right_child=right_child)
 
-def mate_trees(Tree1, Tree2):
-    depth_to_search = min(Tree1.depth, Tree2.depth)
-    for d in range(0, depth_to_search):
-        tree1_candidates = Tree1.directory[d]
-        tree2_candidates = Tree2.directory[d]
-        for i, Node1 in enumerate(tree1_candidates):
-            for j, Node2 in enumerate(tree2_candidates):
-                if Node1.decision_var == Node2.decision_var:
-                    pass
+def copy_tree(target_tree):
+    return DecisionTree(root_node=copy_node(target_tree.root_node))  # to avoid cloning by reference
+
+# assumes you are handing a valid branch point from both trees parametrized
+# by depth and indices
+def mate_trees(Tree1, Tree2, depth, index1, index2):
+    # trees must be new objects to avoid reference mistakes
+    Variant1 = copy_tree(Tree1)
+    Variant2 = copy_tree(Tree2)
+
+    mean_threshold = (Variant1.directory[depth][index1].threshold + Variant2.directory[depth][index2].threshold)/2
+
+    # the actual nodes used to change the trees can be reused from their parent objects
+    # since I haven't been deleting anything yet. This may need to change
+
+    # give variant one the right branch from variant 2, and set the threshold to the mean
+    Variant1.set_by_coordinates(depth, index1, "right_child", copy_node(Tree2.directory[depth][index2].right_child))
+    Variant1.set_by_coordinates(depth, index1, "threshold", mean_threshold)
+
+    # give variant 2 the left branch of variant one, and set the threshold to the mean
+    Variant2.set_by_coordinates(depth, index2, "left_child", copy_node(Tree1.directory[depth][index1].left_child))
+    Variant2.set_by_coordinates(depth, index2, "threshold", mean_threshold)
+
+    return Variant1, Variant2
