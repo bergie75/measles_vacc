@@ -146,21 +146,31 @@ def mate_trees_at_coordinates(Tree1, Tree2, depth, index1, index2):
     # trees must be new objects to avoid reference mistakes
     Variant1 = copy_tree(Tree1)
     Variant2 = copy_tree(Tree2)
+    Variant3 = copy_tree(Tree1)
+    Variant4 = copy_tree(Tree2)
 
-    mean_threshold = (Variant1.directory[depth][index1].threshold + Variant2.directory[depth][index2].threshold)/2
+    mean_threshold = (Tree1.directory[depth][index1].threshold + Tree2.directory[depth][index2].threshold)/2
 
     # the actual nodes used to change the trees can be reused from their parent objects
     # since I haven't been deleting anything yet. This may need to change
 
-    # give variant one the right branch from variant 2, and set the threshold to the mean
+    # give variant one the right branch from tree 2, and set the threshold to the mean
     Variant1.set_by_coordinates(depth, index1, "right_child", copy_node(Tree2.directory[depth][index2].right_child))
     Variant1.set_by_coordinates(depth, index1, "threshold", mean_threshold)
 
-    # give variant 2 the left branch of variant one, and set the threshold to the mean
+    # give variant 2 the left branch of tree one, and set the threshold to the mean
     Variant2.set_by_coordinates(depth, index2, "left_child", copy_node(Tree1.directory[depth][index1].left_child))
     Variant2.set_by_coordinates(depth, index2, "threshold", mean_threshold)
 
-    return Variant1, Variant2
+    # give variant 3 the left branch from tree 2, and set the threshold to the mean
+    Variant3.set_by_coordinates(depth, index1, "left_child", copy_node(Tree2.directory[depth][index2].left_child))
+    Variant1.set_by_coordinates(depth, index1, "threshold", mean_threshold)
+
+    # give variant 4 the right branch of tree one, and set the threshold to the mean
+    Variant2.set_by_coordinates(depth, index2, "right_child", copy_node(Tree1.directory[depth][index1].right_child))
+    Variant2.set_by_coordinates(depth, index2, "threshold", mean_threshold)
+
+    return Variant1, Variant2, Variant3, Variant4
 
 # uses the preceeding two functions to mate two trees. Note that there will be a bias towards mating
 # trees using nodes closer to the leaves, even though that hasn't been explicitly programmed.
