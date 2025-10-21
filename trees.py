@@ -1,13 +1,6 @@
 import numpy as np
 import random
-
-max_simulation_depth = 180
-max_pop = 5000
-action_set = ["increase_vax_rate", "apply_npi", "diagnostic_measurement", "wes_measurement"]
-input_threshold_ranges = {"time_since_diag": [0, max_simulation_depth],
-                    "time_since_wes": [0, max_simulation_depth],
-                      "current_diag": [0, max_pop],
-                        "current_wes": [0, max_pop]}
+from parameters import *
 
 class Node:
     def __init__(self, action=None, decision_var=None, threshold=None, left_child=None, right_child=None):
@@ -54,6 +47,22 @@ class Node:
         self.left_child = left_child
         self.right_child = right_child
 
+    def chain_mutation(self, thresh_prob, decision_prob, max_perc_change, depth_remaining):
+        rng = np.random.default_rng()
+        # if node is a decision node, potentially mutate threshold
+        if self.threshold is not None and (rng.uniform() < thresh_prob):
+            self.mutate_threshold(max_perc_change)
+        # if node is a leaf, potentially turn into a decision node. Checks if depth requirements
+        # are violated so that the depth of a tree can be capped
+        if self.action is not None and (depth_remaining > 0) and (rng.uniform() < decision_prob):
+            self.mutate_into_decision_node()
+        
+        # check for children that are not None. If children exist, determine their mutations
+        if self.left_child is not None:
+            self.left_child.chain_mutation(thresh_prob, decision_prob, max_perc_change, depth_remaining-1)
+        if self.right_child is not None:
+            self.right_child.chain_mutation(thresh_prob, decision_prob, max_perc_change, depth_remaining-1)
+    
     # inputs will be in the form of a dictionary {str(name_decision_var): float(value_of_the_variable)}
     def evaluate(self, inputs):
         # terminal condition to end the recursion
@@ -78,6 +87,7 @@ class Node:
 class DecisionTree:
     def __init__(self, root_node=None):
         self.root_node = root_node
+        self.training_score = np.inf
         # calculates the current depth of the tree and initializes
         # a coordinate representation of the tree for later use
         self.update_directory_and_depth()
@@ -107,6 +117,10 @@ class DecisionTree:
         # to do this. Currently reuses code from initialization
         if attribute_name == "left_child" or attribute_name == "right_child":
             self.update_directory_and_depth()
+    
+    def mutate_tree(self, thresh_prob, decision_prob, max_perc_change, depth_remaining):
+        self.root_node.chain_mutation(thresh_prob, decision_prob, max_perc_change, depth_remaining)
+        self.update_directory_and_depth()
 
 # a helper to avoid cloning by reference when mating trees
 def copy_node(target_node):
@@ -183,6 +197,8 @@ def mate_trees(Tree1, Tree2):
         random_mate_point = mating_points[random_mate_index]
 
         return mate_trees_at_coordinates(Tree1, Tree2, *random_mate_point)
+    else:
+        return Tree1, Tree2
 
 def grow_random_tree(depth, grow_probability=1):
     # DO NOT COMBINE FIRST TWO LINES. It doesn't work, I don't know why
