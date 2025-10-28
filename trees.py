@@ -1,6 +1,15 @@
+# all values controlled by user should come from here
+from parameters import *
+# numerical methods
 import numpy as np
 import random
-from parameters import *
+import copy
+# for saving and loading decision trees
+import os
+import pickle
+# for visualizing trees
+import networkx as nx
+import matplotlib.pyplot as plt
 
 class Node:
     def __init__(self, action=None, decision_var=None, threshold=None, left_child=None, right_child=None):
@@ -14,7 +23,7 @@ class Node:
         if self.action is not None:
             return self.action
         elif (self.threshold is not None) and (self.decision_var is not None):
-            return f"{self.decision_var} >= {self.threshold}"
+            return f"{self.decision_var} <= {self.threshold:0.3f}"
         else:
             return "ERROR: malformed node"
 
@@ -47,21 +56,55 @@ class Node:
         self.left_child = left_child
         self.right_child = right_child
 
-    def chain_mutation(self, thresh_prob, decision_prob, max_perc_change, depth_remaining):
+    def mutate_into_leaf(self):
+        # choose a random action
+        action = random.choice(action_set)
+
+        self.action = action
+        self.decision_var = None
+        self.threshold = None
+        self.left_child = None
+        self.right_child = None
+    
+    def chain_mutation(self, thresh_prob, decision_prob, chop_prob, max_perc_change, depth_remaining):
         rng = np.random.default_rng()
-        # if node is a decision node, potentially mutate threshold
-        if self.threshold is not None and (rng.uniform() < thresh_prob):
-            self.mutate_threshold(max_perc_change)
+        
         # if node is a leaf, potentially turn into a decision node. Checks if depth requirements
-        # are violated so that the depth of a tree can be capped
+        # are violated so that the depth of a tree can be capped. Check leaves first so as not to undo
+        # a chop
         if self.action is not None and (depth_remaining > 0) and (rng.uniform() < decision_prob):
             self.mutate_into_decision_node()
         
+        # if node is a decision node, potentially mutate threshold or turn into a leaf
+        if self.threshold is not None:
+            if rng.uniform() < chop_prob:
+                self.mutate_into_leaf()
+            elif rng.uniform() < thresh_prob:
+                self.mutate_threshold(max_perc_change)
+          
         # check for children that are not None. If children exist, determine their mutations
         if self.left_child is not None:
-            self.left_child.chain_mutation(thresh_prob, decision_prob, max_perc_change, depth_remaining-1)
+            self.left_child.chain_mutation(thresh_prob, decision_prob, chop_prob, max_perc_change, depth_remaining-1)
         if self.right_child is not None:
-            self.right_child.chain_mutation(thresh_prob, decision_prob, max_perc_change, depth_remaining-1)
+            self.right_child.chain_mutation(thresh_prob, decision_prob, chop_prob, max_perc_change, depth_remaining-1)
+    
+    def trim_node(self):
+        # checks to see if both actions recommended in node are the same
+        # if yes, the check is pointless and the node becomes a leaf
+        if self.left_child is not None and self.right_child is not None:
+            if (self.left_child.action is not None) and (self.left_child.action == self.right_child.action):
+                self.action = self.left_child.action
+                self.decision_var = None
+                self.threshold = None
+                self.left_child = None
+                self.right_child = None
+        
+        # continue down the tree making corrections
+        if self.left_child is not None:
+            self.left_child.trim_node()
+        
+        if self.right_child is not None:
+            self.right_child.trim_node()
     
     # inputs will be in the form of a dictionary {str(name_decision_var): float(value_of_the_variable)}
     def evaluate(self, inputs):
@@ -85,9 +128,12 @@ class Node:
         return 1 + max(self.left_child.get_depth(), self.right_child.get_depth())
 
 class DecisionTree:
-    def __init__(self, root_node=None):
+    def __init__(self, root_node=None, ID_length=128):
         self.root_node = root_node
+        # training score stored as a property for quick checks, initialize at maximum cost
         self.training_score = np.inf
+        # ID number used to quickly check if a tree has persisted in training
+        self.ID = random.getrandbits(ID_length)
         # calculates the current depth of the tree and initializes
         # a coordinate representation of the tree for later use
         self.update_directory_and_depth()
@@ -118,9 +164,17 @@ class DecisionTree:
         if attribute_name == "left_child" or attribute_name == "right_child":
             self.update_directory_and_depth()
     
-    def mutate_tree(self, thresh_prob, decision_prob, max_perc_change, depth_remaining):
-        self.root_node.chain_mutation(thresh_prob, decision_prob, max_perc_change, depth_remaining)
+    def mutate_tree(self, thresh_prob, decision_prob, chop_prob, max_perc_change, depth_remaining):
+        self.root_node.chain_mutation(thresh_prob, decision_prob, chop_prob, max_perc_change, depth_remaining)
         self.update_directory_and_depth()
+    
+    def trim_tree(self):
+        self.root_node.trim_node()
+        self.update_directory_and_depth()
+    
+    def save(self, save_to):
+        with open(save_to, 'wb') as outp:
+            pickle.dump(self, outp, pickle.HIGHEST_PROTOCOL)
 
 # a helper to avoid cloning by reference when mating trees
 def copy_node(target_node):
@@ -201,9 +255,13 @@ def mate_trees(Tree1, Tree2):
         return Tree1, Tree2
 
 def grow_random_tree(depth, grow_probability=1):
-    # DO NOT COMBINE FIRST TWO LINES. It doesn't work, I don't know why
-    root_node = Node()
-    root_node.mutate_into_decision_node()
+    if depth > 1:
+        # DO NOT COMBINE THESE TWO LINES. It doesn't work, I don't know why
+        root_node = Node()
+        root_node.mutate_into_decision_node()
+    else:
+        root_node = Node(action=random.choice(action_set))
+    
     dec_tree = DecisionTree(root_node=root_node)
     rng = np.random.default_rng()
     while dec_tree.depth < depth:
@@ -215,3 +273,35 @@ def grow_random_tree(depth, grow_probability=1):
         dec_tree.update_directory_and_depth()
     
     return dec_tree
+
+def load_tree(proj_folder="measles_vacc", sub_folder="", filename="default_tree.pkl"):
+    cwd = os.getcwd()
+    load_from = os.path.join(cwd, proj_folder, sub_folder, filename)
+    with open(load_from, 'rb') as inp:
+        loaded_tree = pickle.load(inp)
+    
+    return loaded_tree
+
+def visualize_tree(Tree, filename, proj_folder="measles_vacc", sub_folder=""):
+    starting_point=8*2**Tree.depth
+    blank_line = [" "]*max(128, 4*starting_point)
+    
+    def recursive_build(Node=Tree.root_node, array_to_build=[copy.deepcopy(blank_line)], 
+                        depth_to_mod=0, basepoint=starting_point, child_spacing=starting_point):
+        node_info = str(Node)
+        length = len(node_info)
+        array_to_build[depth_to_mod][basepoint-int(length/2):basepoint+length-int(length/2)] = node_info
+        if (Node.left_child is not None or Node.right_child is not None) and len(array_to_build)<=depth_to_mod+1:
+            array_to_build.append(copy.deepcopy(blank_line))
+        if Node.left_child is not None:
+            array_to_build=recursive_build(Node.left_child, array_to_build, depth_to_mod+1, basepoint-int(child_spacing/2**(depth_to_mod+1)))
+        if Node.right_child is not None:
+            array_to_build=recursive_build(Node.right_child, array_to_build, depth_to_mod+1, basepoint+int(child_spacing/2**(depth_to_mod+1)))
+        
+        return array_to_build
+    
+    array_to_build = recursive_build()
+    cwd = os.getcwd()
+    with open(os.path.join(cwd, proj_folder, sub_folder, filename), "w") as f:
+        for i,entry in enumerate(array_to_build):
+            f.write(f"{i}:{"".join(entry)}\n")

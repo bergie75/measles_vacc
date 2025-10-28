@@ -30,6 +30,7 @@ def simulate_day(initial_state, disease_params, vax_rate_modifier, npi_modifier,
 def score_tree(candidate_tree):
     # initialize a simulation
     outbreak_has_begun = False
+    wastewater_used = False
     population_state = np.array([max_pop, 0, 0, 0])
     modifier_counters = {"vax": 0, "npi": 0}
     decision_inputs = {"time_since_diag": np.inf,
@@ -43,8 +44,8 @@ def score_tree(candidate_tree):
     for day in range(0, max_simulation_depth):
         if not outbreak_has_begun and (rng.uniform() < outbreak_prob):
             outbreak_has_begun = True
-            initial_exposed_frac = rng.uniform(high=maximal_initial_exposed)
-            population_state = np.array([max_pop*(1-initial_exposed_frac), 0, max_pop*initial_exposed_frac, 0])
+            initial_exposed_pop = np.random.choice([x for x in range(1, 1+maximal_initial_exposed)])
+            population_state = np.array([max_pop-initial_exposed_pop, 0, initial_exposed_pop, 0])
 
         # use decision tree to generate a candidate action for the simulation
         proposed_action = candidate_tree.evaluate(decision_inputs)
@@ -83,6 +84,12 @@ def score_tree(candidate_tree):
         
         elif proposed_action == "wes_measurement":
             tree_score += cost_per_wes_measurement
+            # if wastewater treatment plant has not been used to sample yet, add additional
+            # 1-time cost
+            if not wastewater_used:
+                tree_score += cost_of_opening_wes_site
+                wastewater_used = True
+            
             # reset counter on time since measurement, and generate a noisy wastewater sample
             # by exponentiating a lognormal sample (guarantees nonnegative)
             decision_inputs["time_since_wes"] = 0
@@ -96,6 +103,12 @@ def score_tree(candidate_tree):
         if outbreak_has_begun:
             population_state = simulate_day(population_state, disease_params, vax_rate_modifier, npi_modifier, modifier_counters)
         
+        # compute cost of vaccine interventions
+        cost_per_vax_increase = cost_vax_level(decision_inputs["current_diag"],
+                                               decision_inputs["current_wes"],
+                                               decision_inputs["time_since_diag"],
+                                               decision_inputs["time_since_wes"])
+        
         # add running totals
         tree_score += cost_per_exposed*population_state[2]+cost_per_infected*population_state[3]
         tree_score += cost_per_vax_increase*modifier_counters["vax"]+cost_per_npi_increase*modifier_counters["npi"]
@@ -103,6 +116,4 @@ def score_tree(candidate_tree):
     return tree_score
 
 if __name__ == "__main__":
-    candidate_tree = grow_random_tree(depth=4)
-    print(candidate_tree.directory)
-    print(score_tree(candidate_tree))
+    pass

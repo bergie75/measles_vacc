@@ -1,12 +1,21 @@
-from trees import Node, DecisionTree, grow_random_tree, mate_trees
+from trees import Node, DecisionTree, grow_random_tree, mate_trees, load_tree
 from state_simulator import score_tree
 from parameters import *
 
 import numpy as np
+import warnings
+import os
+import shutil
 
 # create a simple ensemble of candidate trees
 def generate_initial_candidates(number_of_members, depth=1):
     return [grow_random_tree(depth=depth) for _ in range(0, number_of_members)]
+
+def check_basic_reproduction_number(disease_params):
+    beta, vax_rate, mu, c, gamma, delta = disease_params
+    threshold_1 = mu*beta/(mu+vax_rate)*(c*mu+gamma+c*delta)/((mu+gamma)*(mu+delta))
+    threshold_2 = c*beta*mu/((mu+vax_rate)*(2*mu+delta+gamma))
+    return [threshold_1, threshold_2]
 
 # yields the average score of a tree on num_simulations disease outbreaks, used to sort trees
 def tree_training_score(candidate_tree):
@@ -15,38 +24,99 @@ def tree_training_score(candidate_tree):
         score += score_tree(candidate_tree)
     return score/num_simulations
 
-def optimize(number_of_members, max_rounds, starting_depth):
-    # source of randomness
-    rng = np.random.default_rng()
+def optimize(number_of_members, max_rounds, starting_depth=1,
+              run_name="temp_experiment", reload=None, round=0):
     
+    # create folder to save the run
+    cwd = os.getcwd()
+    run_home_folder = os.path.join(cwd, "measles_vacc", run_name)
+    if not os.path.exists(run_home_folder):
+        os.makedirs(run_home_folder)
+
     # initial candidate trees
-    candidate_trees = generate_initial_candidates(number_of_members, depth=starting_depth)
+    if reload is None:
+        candidate_trees = generate_initial_candidates(number_of_members, depth=starting_depth)
+    else:
+        candidate_trees = []
+        load_from = os.path.join(cwd, "measles_vacc", reload, f"round_{round}")
+        for file in os.listdir(load_from):
+            if file.find(".pkl") != -1:
+                candidate_trees.append(load_tree(file))
     
-    # main loop to upgrade our trees
-    for i in range(0, max_rounds):
-        #sort the trees based on how they score, we sort in ascending order since lower scores are
-        #better
-        print(f"Beginning tree fitness evaluation for round {i} ...")
-        for tree_number, candidate in enumerate(candidate_trees):
-            candidate.__setattr__("training_score", tree_training_score(candidate))
-            if tree_number % 10 == 0:
-                print(f"\tCompleted tree {tree_number}")
-        print(f"All trees evaluated, sorting candidates and selecting top choices ...")
-        sorted_candidates = sorted(candidate_trees, key=lambda x: x.training_score)
-        candidate_trees = sorted_candidates[:top_choices]
-        print(f"Candidates evaluated and top {top_choices} of {number_of_members} selected")
-        
-        print("Generating offspring from top candidates")
-        for _ in range(0, number_of_members-top_choices):
-            Parent1 = np.random.choice(sorted_candidates[:top_choices])
-            Parent2 = np.random.choice(sorted_candidates[:top_choices])
-            # recall that if trees can't be mated, the parents are returned as choices
-            Child = np.random.choice(mate_trees(Parent1, Parent2))
-            # double check the depth restriction here
-            Child.mutate_tree(threshold_mutation_probability, decision_mutation_probability,
-                               0.2, max_tree_depth-1)
-            candidate_trees.append(Child)
-        print("Offspring generated, round completed\n")
+    # use tree IDs to track the turnover between rounds
+    old_ids = set([candidate.ID for candidate in candidate_trees])
+
+    # place a copy of the parameters file as a text file in training folder to check parameters
+    # used for training
+    par_file = os.path.join(cwd, "measles_vacc", "parameters.py")
+    text_file = os.path.join(run_home_folder, "archived_parameters.txt")
+    shutil.copy(par_file, text_file)
+    
+    # open a logging file to store run information
+    logfile = os.path.join(run_home_folder, "training_log.txt")
+
+    with open(logfile, 'w') as log:
+        # main loop to upgrade our trees
+        for i in range(0, max_rounds):
+            #sort the trees based on how they score, sort in ascending order since lower is better
+            log.write(f"Beginning tree fitness evaluation for round {i} ...")
+            print(f"Beginning tree fitness evaluation for round {i} ...")
+            
+            for candidate in candidate_trees:
+                candidate.__setattr__("training_score", tree_training_score(candidate))
+            
+            log.write(f"All trees evaluated, sorting candidates and selecting top choices ...")
+            print(f"All trees evaluated, sorting candidates and selecting top choices ...")
+            sorted_candidates = sorted(candidate_trees, key=lambda x: x.training_score)
+            candidate_trees = sorted_candidates[:top_choices]
+
+            # quickly measure average fitness of top candidates for convergence and save trees
+            fitness_check = 0
+            new_ids = []
+            tree_depths = []
+            round_folder = os.path.join(run_home_folder, f"round_{i}")
+            os.makedirs(round_folder)
+
+            for tree_index, curr_tree in enumerate(candidate_trees):
+                fitness_check += curr_tree.training_score
+                curr_tree.save(os.path.join(round_folder, f"tree_{tree_index}.pkl"))
+                new_ids.append(curr_tree.ID)
+                tree_depths.append(curr_tree.depth)
+            
+            fitness_check /= top_choices
+            log.write(f"Average fitness of top {top_choices}/{number_of_members} members: {fitness_check}")
+            print(f"Average fitness of top {top_choices}/{number_of_members} members: {fitness_check}")
+
+            new_ids = set(new_ids)
+            tree_persistence = 100*len(old_ids & new_ids)/len(new_ids)
+            log.write(f"Percentage of trees persisting from last round: {tree_persistence:0.3f}%")
+            print(f"Percentage of trees persisting from last round: {tree_persistence:0.3f}%")
+
+            depth_mean = np.mean(tree_depths)
+            depth_dev = np.std(tree_depths)
+            log.write(f"Average depth: {depth_mean}, standard deviation: {depth_dev}")
+            print(f"Average depth: {depth_mean}, standard deviation: {depth_dev}")
+            
+            log.write("Generating offspring from top candidates")
+            print("Generating offspring from top candidates")
+            
+            for _ in range(0, number_of_members-top_choices):
+                Parent1 = np.random.choice(sorted_candidates[:top_choices])
+                Parent2 = np.random.choice(sorted_candidates[:top_choices])
+                # recall that if trees can't be mated, the parents are returned as choices
+                Child = np.random.choice(mate_trees(Parent1, Parent2))
+                # double check the depth restriction here
+                Child.mutate_tree(threshold_mutation_probability*threshold_attenuation**i,
+                                decision_mutation_probability*decision_attenuation**i,
+                                chop_decision_probability*chop_attenuation**i,
+                                0.2, max_tree_depth-1)
+                candidate_trees.append(Child)
+            
+            log.write("Offspring generated, round completed\n")
+            print("Offspring generated, round completed\n")
 
 if __name__ == "__main__":
-    optimize(number_of_members, max_rounds, 1)
+    warnings.filterwarnings("ignore")
+    #thresholds = check_basic_reproduction_number(disease_params)
+    #print(f"Threshold 1: {thresholds[0]}, Threshold 2: {thresholds[1]}")
+    optimize(number_of_members, max_rounds, 2)

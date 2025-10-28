@@ -11,42 +11,65 @@ input_threshold_ranges = {"time_since_diag": [0, max_simulation_depth],
                       "current_diag": [0, max_pop],
                         "current_wes": [0, max_pop]}
 
-# describes the overall range of choices on vaccination
-vax_rate_modifier = 1.05
-
-# how to step the npi measures
-npi_modifier = 0.9
-
 # affect measurements
 wes_std_frac = 0.1  # determines how noisy wastewater surveillance is
 infected_seeking_care_frac = 0.2
 
 # disease dynamics parameters
-mu = 1
-c = 1
-gamma = 1
-delta = 1
-beta = 0.1
-vax_rate = 1
+mu = 0.01
+c = 0.6
+gamma = np.log(2)/3  # after 3 days, 50% of exposed patients become infected (half life)
+delta = np.log(2)/3  # after 3 days, 50% of infected patients have recovered
+beta = 0.3
+vax_rate = 0.001
 disease_params = np.array([beta,vax_rate,mu,c,gamma,delta])
 
+# describes the overall range of choices on vaccination
+vax_rate_modifier = np.exp(np.log(10)/2) # calculated so that 2 modifiers causes disease to decline
+
+# how to step the npi measures
+npi_modifier = 0.9
+
 # set outbreak initial conditions
-outbreak_prob=0.01
-maximal_initial_exposed=1/max_pop
+outbreak_prob=0.05
+maximal_initial_exposed=1
+
+# vax cost parameters
+max_cost_per_vax_increase = 10
+min_cost_per_vax_increase = 0.05
+vax_response_to_diag = 0.01
+vax_response_to_wes = 0.01
+diag_info_decay_rate = -np.log(2)/4  # how long before the case count is considered half as impactful
+wes_info_decay_rate = -np.log(2)/4  # how long before the case count is considered half as impactful
+
+# cost functions for more complicated interventions
+def cost_vax_level(current_diag, current_wes, time_since_diag, time_since_wes):
+    wes_impact = vax_response_to_wes*current_wes*np.exp(wes_info_decay_rate*time_since_wes)
+    diag_impact = vax_response_to_diag*current_diag*np.exp(diag_info_decay_rate*time_since_diag)
+    # an interpolation parameter to go between maximum and minimum costs
+    t = np.tanh(wes_impact+diag_impact)  #argument greater than or equal to zero
+
+    return t*min_cost_per_vax_increase + (1-t)*max_cost_per_vax_increase
 
 # costs of various actions
-cost_per_vax_increase = 1
-cost_per_npi_increase = 1
+cost_per_npi_increase = 5
 cost_per_diag_measurement = 1
-cost_per_wes_measurement = 1
-cost_per_infected = 1
-cost_per_exposed = 1
+cost_per_wes_measurement = 0.5
+cost_per_infected = 10
+cost_per_exposed = 10
+cost_of_opening_wes_site = 0
 
 # parameters to control the genetic algorithm
-num_simulations = 1000
+num_simulations = 40
 max_tree_depth = 6
-number_of_members = 1000
-top_choices = 50
-max_rounds = 100
-threshold_mutation_probability = 0.001
-decision_mutation_probability = 0.001
+number_of_members = 250
+top_choices = 25
+max_rounds = 200
+
+# controls mutations in trees
+threshold_mutation_probability = 0.9
+threshold_attenuation = 0.98
+decision_mutation_probability = 0.4
+decision_attenuation = 0.98
+chop_decision_probability = 0.05
+chop_attenuation = 1
