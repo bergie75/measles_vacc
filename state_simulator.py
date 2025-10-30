@@ -2,6 +2,8 @@ import numpy as np
 from trees import Node, DecisionTree, grow_random_tree
 from parameters import *
 from scipy.integrate import odeint
+from collections import Counter
+import matplotlib.pyplot as plt
 
 # to generate random numbers
 rng = np.random.default_rng()
@@ -40,6 +42,9 @@ def score_tree(candidate_tree):
 
     # results to return, keeps running totals on costs accrued by tree
     tree_score = 0
+
+    # keeps tracks of all decision paths chosen by the tree, useful for data visualization
+    decision_paths = []
     
     for day in range(0, max_simulation_depth):
         if not outbreak_has_begun and (rng.uniform() < outbreak_prob):
@@ -48,10 +53,16 @@ def score_tree(candidate_tree):
             population_state = np.array([max_pop-initial_exposed_pop, 0, initial_exposed_pop, 0])
 
         # use decision tree to generate a candidate action for the simulation
-        proposed_action = candidate_tree.evaluate(decision_inputs)
+        proposed_action, decision_path = candidate_tree.evaluate(decision_inputs)
+        decision_paths.append(decision_path)
         
         # use selected action to modify simulation. Need to add check to ensure weird hacks don't emerge
-        if proposed_action == "increase_vax_rate":
+        if proposed_action == "pass":
+            # null action, simply update counters since measurement occurred
+            decision_inputs["time_since_diag"] += 1
+            decision_inputs["time_since_wes"] += 1
+        
+        elif proposed_action == "increase_vax_rate":
             decision_inputs["time_since_diag"] += 1
             decision_inputs["time_since_wes"] += 1
             modifier_counters["vax"] += 1
@@ -95,13 +106,16 @@ def score_tree(candidate_tree):
             decision_inputs["time_since_wes"] = 0
             if population_state[2] > 0:
                 measurement_mean = np.log(population_state[2])
-                decision_inputs["current_wes"] = np.exp(rng.lognormal(measurement_mean,wes_std_frac*np.abs(measurement_mean)))
+                decision_inputs["current_wes"] = np.exp(rng.normal(measurement_mean,wes_std_frac*np.abs(measurement_mean)))
             else:
                 decision_inputs["current_wes"] = 0
         
         # hard check to ensure no numerical leaking, even though none sick is a fixed point
         if outbreak_has_begun:
-            population_state = simulate_day(population_state, disease_params, vax_rate_modifier, npi_modifier, modifier_counters)
+            # ODE works with population fractions, but tree uses raw totals. Normalize before simulating
+            start_population_fracs = population_state/max_pop
+            end_population_fracs = simulate_day(start_population_fracs, disease_params, vax_rate_modifier, npi_modifier, modifier_counters)
+            population_state = end_population_fracs*max_pop
         
         # compute cost of vaccine interventions
         cost_per_vax_increase = cost_vax_level(decision_inputs["current_diag"],
@@ -113,7 +127,17 @@ def score_tree(candidate_tree):
         tree_score += cost_per_exposed*population_state[2]+cost_per_infected*population_state[3]
         tree_score += cost_per_vax_increase*modifier_counters["vax"]+cost_per_npi_increase*modifier_counters["npi"]
     
-    return tree_score
+    return tree_score, decision_paths
 
-if __name__ == "__main__":
-    pass
+def tree_decision_plots(Tree, min_day=0, max_day=max_simulation_depth):
+    _ , decision_path_samples = score_tree(Tree)
+    selected_samples = decision_path_samples[min_day:max_day]
+    path_frequencies = dict(Counter(selected_samples).most_common())
+
+    for key in path_frequencies.keys():
+        if path_frequencies[key] > 0:
+            print(f"{key} : {path_frequencies[key]}")
+
+    plt.bar(range(len(path_frequencies)), list(path_frequencies.values()), align='center')
+    plt.xticks(range(len(path_frequencies)), range(len(path_frequencies)))
+    plt.show()

@@ -66,7 +66,8 @@ class Node:
         self.left_child = None
         self.right_child = None
     
-    def chain_mutation(self, thresh_prob, decision_prob, chop_prob, max_perc_change, depth_remaining):
+    def chain_mutation(self, thresh_prob, decision_prob, chop_prob,
+                        max_perc_change, depth_remaining):
         rng = np.random.default_rng()
         
         # if node is a leaf, potentially turn into a decision node. Checks if depth requirements
@@ -77,16 +78,18 @@ class Node:
         
         # if node is a decision node, potentially mutate threshold or turn into a leaf
         if self.threshold is not None:
-            if rng.uniform() < chop_prob:
-                self.mutate_into_leaf()
-            elif rng.uniform() < thresh_prob:
+            if rng.uniform() < thresh_prob:
                 self.mutate_threshold(max_perc_change)
+            elif rng.uniform() < chop_prob:
+                self.mutate_into_leaf()
           
         # check for children that are not None. If children exist, determine their mutations
         if self.left_child is not None:
-            self.left_child.chain_mutation(thresh_prob, decision_prob, chop_prob, max_perc_change, depth_remaining-1)
+            self.left_child.chain_mutation(thresh_prob, decision_prob, chop_prob,
+                                            max_perc_change, depth_remaining-1)
         if self.right_child is not None:
-            self.right_child.chain_mutation(thresh_prob, decision_prob, chop_prob, max_perc_change, depth_remaining-1)
+            self.right_child.chain_mutation(thresh_prob, decision_prob, chop_prob,
+                                             max_perc_change, depth_remaining-1)
     
     def trim_node(self):
         # checks to see if both actions recommended in node are the same
@@ -107,16 +110,19 @@ class Node:
             self.right_child.trim_node()
     
     # inputs will be in the form of a dictionary {str(name_decision_var): float(value_of_the_variable)}
-    def evaluate(self, inputs):
+    def evaluate(self, inputs, dec_path="[]"):
         # terminal condition to end the recursion
         if self.terminal_leaf():
-            return self.action
+            modded_dec_path = dec_path + f"_[{self.action}]"
+            return self.action, modded_dec_path
         
         # check threshold to determine the branch to follow, uses dictionary structure of inputs
         if inputs[self.decision_var] <= self.threshold:
-            return self.left_child.evaluate(inputs)
+            modded_dec_path = dec_path + f"_[{self.decision_var}<={self.threshold:.2f}]"
+            return self.left_child.evaluate(inputs, dec_path=modded_dec_path)
         else:
-            return self.right_child.evaluate(inputs)
+            modded_dec_path = dec_path + f"_[{self.decision_var}>{self.threshold}]"
+            return self.right_child.evaluate(inputs, dec_path=modded_dec_path)
     
     def get_depth(self):
         # base case of recursion

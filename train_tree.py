@@ -21,7 +21,8 @@ def check_basic_reproduction_number(disease_params):
 def tree_training_score(candidate_tree):
     score = 0
     for _ in range(0, num_simulations):
-        score += score_tree(candidate_tree)
+        one_sim_score, _ = score_tree(candidate_tree)
+        score += one_sim_score
     return score/num_simulations
 
 def optimize(number_of_members, max_rounds, starting_depth=1,
@@ -116,7 +117,7 @@ def optimize(number_of_members, max_rounds, starting_depth=1,
             print("Offspring generated, round completed\n")
 
 if __name__ == "__main__":
-    warnings.filterwarnings("ignore")
+    #warnings.filterwarnings("ignore")
     #thresholds = check_basic_reproduction_number(disease_params)
     #print(f"Threshold 1: {thresholds[0]}, Threshold 2: {thresholds[1]}")
-    optimize(number_of_members, max_rounds, 2)
+    optimize(number_of_members, max_rounds, 2, run_name="growing_chop_prob")
