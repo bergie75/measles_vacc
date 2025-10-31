@@ -30,7 +30,7 @@ def optimize(number_of_members, max_rounds, starting_depth=1,
     
     # create folder to save the run
     cwd = os.getcwd()
-    run_home_folder = os.path.join(cwd, "measles_vacc", run_name)
+    run_home_folder = os.path.join(cwd, "measles_vacc", "run_data", run_name)
     if not os.path.exists(run_home_folder):
         os.makedirs(run_home_folder)
 
@@ -120,4 +120,4 @@ if __name__ == "__main__":
     #warnings.filterwarnings("ignore")
     #thresholds = check_basic_reproduction_number(disease_params)
     #print(f"Threshold 1: {thresholds[0]}, Threshold 2: {thresholds[1]}")
-    optimize(number_of_members, max_rounds, 2, run_name="growing_chop_prob")
+    optimize(number_of_members, max_rounds, 2, run_name="test_unit_thresholds")

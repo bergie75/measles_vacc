@@ -18,6 +18,7 @@ class Node:
         self.threshold = threshold
         self.left_child = left_child
         self.right_child = right_child
+        self.number_calls = 0
 
     def __repr__(self):
         if self.action is not None:
@@ -31,21 +32,19 @@ class Node:
         return (self.action is not None)
     
     # defaults to taking a new value between 80% and 120% of old value
-    # enforces threshold limits
     def mutate_threshold(self, max_perc_change=0.2):
         rng = np.random.default_rng()
         multiplier = rng.uniform(low=1-max_perc_change, high=1+max_perc_change)
-        candidate_value = self.threshold*multiplier
+        candidate_value = min(self.threshold*multiplier, 1)
 
-        if input_threshold_ranges[self.decision_var][0] <= candidate_value <= input_threshold_ranges[self.decision_var][0]:
-            self.threshold = candidate_value
+        self.threshold = candidate_value
     
     # transforms a node from a leaf to a decision node with two children
     # can be used to grow a tree
     def mutate_into_decision_node(self):
         rng = np.random.default_rng()
-        decision_var, range = random.choice(list(input_threshold_ranges.items()))
-        threshold = rng.uniform(low=range[0], high=range[1])
+        decision_var = random.choice(simulation_outputs)
+        threshold = rng.uniform()
 
         left_child = Node(action=random.choice(action_set))
         right_child = Node(action=random.choice(action_set))
@@ -124,6 +123,13 @@ class Node:
             modded_dec_path = dec_path + f"_[{self.decision_var}>{self.threshold}]"
             return self.right_child.evaluate(inputs, dec_path=modded_dec_path)
     
+    def reset_calls_recursive(self):
+        self.__setattr__("number_calls", 0)
+        if self.left_child is not None:
+            self.left_child.reset_calls_recursive()
+        if self.right_child is not None:
+            self.right_child.reset_calls_recursive()
+    
     def get_depth(self):
         # base case of recursion
         if self.action is not None:
@@ -174,6 +180,9 @@ class DecisionTree:
         self.root_node.chain_mutation(thresh_prob, decision_prob, chop_prob, max_perc_change, depth_remaining)
         self.update_directory_and_depth()
     
+    def reset_calls(self):
+        self.root_node.reset_calls_recursive()
+
     def trim_tree(self):
         self.root_node.trim_node()
         self.update_directory_and_depth()
