@@ -138,7 +138,7 @@ class Node:
             self.right_child.trim_node()
     
     # inputs will be in the form of a dictionary {str(name_decision_var): float(value_of_the_variable)}
-    def evaluate(self, inputs, dec_path="[]"):
+    def evaluate(self, inputs, dec_path=""):
         # terminal condition to end the recursion
         if self.terminal_leaf():
             modded_dec_path = dec_path + f"_[{self.action}: {self.action_value}]"
@@ -149,7 +149,7 @@ class Node:
             modded_dec_path = dec_path + f"_[{self.decision_var}<={self.threshold:.2f}]"
             return self.left_child.evaluate(inputs, dec_path=modded_dec_path)
         else:
-            modded_dec_path = dec_path + f"_[{self.decision_var}>{self.threshold}]"
+            modded_dec_path = dec_path + f"_[{self.decision_var}>{self.threshold:.2f}]"
             return self.right_child.evaluate(inputs, dec_path=modded_dec_path)
     
     def reset_calls_recursive(self):

@@ -49,7 +49,7 @@ def score_tree(candidate_tree, print_check=False):
     # keeps tracks of all decision paths chosen by the tree, useful for data visualization
     decision_paths = []
     
-    for day in range(0, max_simulation_depth):
+    for _ in range(0, max_simulation_depth):
         if not outbreak_has_begun and (rng.uniform() < outbreak_prob):
             outbreak_has_begun = True
             initial_exposed_pop = np.random.choice([x for x in range(1, 1+maximal_initial_exposed)])
@@ -103,8 +103,8 @@ def score_tree(candidate_tree, print_check=False):
                 decision_inputs["current_wes"] = 0
         
         # enforce upper limits correctly
-        decision_inputs["current_wes"] = min(1, decision_inputs["current_wes"])
-        decision_inputs["current_diag"] = min(1, decision_inputs["current_diag"])
+        decision_inputs["time_since_wes"] = min(1, decision_inputs["time_since_wes"])
+        decision_inputs["time_since_diag"] = min(1, decision_inputs["time_since_diag"])
         
         # hard check to ensure no numerical leaking, even though none sick is a fixed point
         if outbreak_has_begun:
