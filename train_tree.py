@@ -43,7 +43,7 @@ def optimize(number_of_members, max_rounds, starting_depth=1,
         load_from = os.path.join(cwd, "measles_vacc", reload, f"round_{round}")
         for file in os.listdir(load_from):
             if file.find(".pkl") != -1:
-                candidate_trees.append(load_tree(file))
+                candidate_trees.append(load_tree(subfolder=reload, filename=file))
         while len(candidate_trees) < number_of_members:
             candidate_trees.append(grow_random_tree(depth=starting_depth))
     
