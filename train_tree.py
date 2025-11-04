@@ -44,6 +44,8 @@ def optimize(number_of_members, max_rounds, starting_depth=1,
         for file in os.listdir(load_from):
             if file.find(".pkl") != -1:
                 candidate_trees.append(load_tree(file))
+        while len(candidate_trees) < number_of_members:
+            candidate_trees.append(grow_random_tree(depth=starting_depth))
     
     # use tree IDs to track the turnover between rounds
     old_ids = set([candidate.ID for candidate in candidate_trees])
@@ -133,4 +135,4 @@ if __name__ == "__main__":
     #warnings.filterwarnings("ignore")
     #thresholds = check_basic_reproduction_number(disease_params)
     #print(f"Threshold 1: {thresholds[0]}, Threshold 2: {thresholds[1]}")
-    optimize(number_of_members, max_rounds, 2, run_name="less_likely_outbreak")
+    pass
