@@ -12,8 +12,11 @@ import networkx as nx
 import matplotlib.pyplot as plt
 
 class Node:
-    def __init__(self, action=None, decision_var=None, threshold=None, left_child=None, right_child=None):
+    def __init__(self, action=None, action_value = None, decision_var=None, threshold=None,
+                  left_child=None, right_child=None):
+        
         self.action = action
+        self.action_value = action_value
         self.decision_var = decision_var
         self.threshold = threshold
         self.left_child = left_child
@@ -22,7 +25,10 @@ class Node:
 
     def __repr__(self):
         if self.action is not None:
-            return self.action
+            if self.action_value is not None:
+                return f"{self.action}: {self.action_value}"
+            else:
+                return self.action
         elif (self.threshold is not None) and (self.decision_var is not None):
             return f"{self.decision_var} <= {self.threshold:0.3f}"
         else:
@@ -35,9 +41,15 @@ class Node:
     def mutate_threshold(self, max_perc_change=0.2):
         rng = np.random.default_rng()
         multiplier = rng.uniform(low=1-max_perc_change, high=1+max_perc_change)
-        candidate_value = min(self.threshold*multiplier, 1)
-
-        self.threshold = candidate_value
+        self.threshold = min(self.threshold*multiplier, 1)
+    
+    def mutate_decision_var(self):
+        self.decision_var = random.choice(simulation_outputs)
+    
+    def mutate_action_value(self, max_perc_change=0.2):
+        rng = np.random.default_rng()
+        multiplier = rng.uniform(low=1-max_perc_change, high=1+max_perc_change)
+        self.action_value = min(self.action_value*multiplier, 1)
     
     # transforms a node from a leaf to a decision node with two children
     # can be used to grow a tree
@@ -46,10 +58,17 @@ class Node:
         decision_var = random.choice(simulation_outputs)
         threshold = rng.uniform()
 
+        # create children, checking if an action value is needed
         left_child = Node(action=random.choice(action_set))
+        if left_child.action in actions_requiring_values:
+            left_child.__setattr__("action_value", rng.uniform())
+        
         right_child = Node(action=random.choice(action_set))
+        if right_child.action in actions_requiring_values:
+            right_child.__setattr__("action_value", rng.uniform())
 
         self.action = None
+        self.action_value = None
         self.decision_var = decision_var
         self.threshold = threshold
         self.left_child = left_child
@@ -60,41 +79,51 @@ class Node:
         action = random.choice(action_set)
 
         self.action = action
+        if action in actions_requiring_values:
+            rng = np.random.default_rng()
+            self.action_value = rng.uniform()
+        
         self.decision_var = None
         self.threshold = None
         self.left_child = None
         self.right_child = None
     
-    def chain_mutation(self, thresh_prob, decision_prob, chop_prob,
-                        max_perc_change, depth_remaining):
+    def chain_mutation(self, thresh_prob, decision_prob, chop_prob, var_change_prob,
+                        action_prob, max_perc_change, depth_remaining):
         rng = np.random.default_rng()
         
         # if node is a leaf, potentially turn into a decision node. Checks if depth requirements
         # are violated so that the depth of a tree can be capped. Check leaves first so as not to undo
         # a chop
+        if self.action_value is not None and (rng.uniform() < action_prob):
+            self.mutate_action_value(max_perc_change)
+        
         if self.action is not None and (depth_remaining > 0) and (rng.uniform() < decision_prob):
             self.mutate_into_decision_node()
         
-        # if node is a decision node, potentially mutate threshold or turn into a leaf
+        # if node is a decision node, potentially mutate threshold, decision variable, or turn into a leaf
         if self.threshold is not None:
-            if rng.uniform() < thresh_prob:
-                self.mutate_threshold(max_perc_change)
-            elif rng.uniform() < chop_prob:
+            if rng.uniform() > chop_prob:
+                if rng.uniform() < thresh_prob:
+                    self.mutate_threshold(max_perc_change)
+                if rng.uniform() < var_change_prob:
+                    self.mutate_decision_var()
+            else:
                 self.mutate_into_leaf()
           
         # check for children that are not None. If children exist, determine their mutations
         if self.left_child is not None:
-            self.left_child.chain_mutation(thresh_prob, decision_prob, chop_prob,
-                                            max_perc_change, depth_remaining-1)
+            self.left_child.chain_mutation(thresh_prob, decision_prob, chop_prob, var_change_prob,
+                        action_prob, max_perc_change, depth_remaining-1)
         if self.right_child is not None:
-            self.right_child.chain_mutation(thresh_prob, decision_prob, chop_prob,
-                                             max_perc_change, depth_remaining-1)
+            self.right_child.chain_mutation(thresh_prob, decision_prob, chop_prob, var_change_prob,
+                        action_prob, max_perc_change, depth_remaining-1)
     
     def trim_node(self):
         # checks to see if both actions recommended in node are the same
         # if yes, the check is pointless and the node becomes a leaf
         if self.left_child is not None and self.right_child is not None:
-            if (self.left_child.action is not None) and (self.left_child.action == self.right_child.action):
+            if (self.left_child.action is not None) and (self.left_child.action == self.right_child.action) and not (self.left_child.action in actions_requiring_values):
                 self.action = self.left_child.action
                 self.decision_var = None
                 self.threshold = None
@@ -112,8 +141,8 @@ class Node:
     def evaluate(self, inputs, dec_path="[]"):
         # terminal condition to end the recursion
         if self.terminal_leaf():
-            modded_dec_path = dec_path + f"_[{self.action}]"
-            return self.action, modded_dec_path
+            modded_dec_path = dec_path + f"_[{self.action}: {self.action_value}]"
+            return self.action, self.action_value, modded_dec_path
         
         # check threshold to determine the branch to follow, uses dictionary structure of inputs
         if inputs[self.decision_var] <= self.threshold:
@@ -143,7 +172,9 @@ class DecisionTree:
     def __init__(self, root_node=None, ID_length=128):
         self.root_node = root_node
         # training score stored as a property for quick checks, initialize at maximum cost
+        # also holds a standard deviation attribute
         self.training_score = np.inf
+        self.score_std = 0
         # ID number used to quickly check if a tree has persisted in training
         self.ID = random.getrandbits(ID_length)
         # calculates the current depth of the tree and initializes
@@ -176,8 +207,11 @@ class DecisionTree:
         if attribute_name == "left_child" or attribute_name == "right_child":
             self.update_directory_and_depth()
     
-    def mutate_tree(self, thresh_prob, decision_prob, chop_prob, max_perc_change, depth_remaining):
-        self.root_node.chain_mutation(thresh_prob, decision_prob, chop_prob, max_perc_change, depth_remaining)
+    def mutate_tree(self, thresh_prob, decision_prob, chop_prob, var_change_prob,
+                        action_prob, max_perc_change, depth_remaining):
+        
+        self.root_node.chain_mutation(thresh_prob, decision_prob, chop_prob, var_change_prob,
+                        action_prob, max_perc_change, depth_remaining)
         self.update_directory_and_depth()
     
     def reset_calls(self):
@@ -195,7 +229,7 @@ class DecisionTree:
 def copy_node(target_node):
     # base case for recursion
     if target_node.action is not None:
-        return Node(action=target_node.action)
+        return Node(action=target_node.action, action_value=target_node.action_value)
     else:
         decision_var = target_node.decision_var
         threshold = target_node.threshold
@@ -276,6 +310,8 @@ def grow_random_tree(depth, grow_probability=1):
         root_node.mutate_into_decision_node()
     else:
         root_node = Node(action=random.choice(action_set))
+        if root_node.action in actions_requiring_values:
+            root_node.__setattr__("action_value", rng.uniform())
     
     dec_tree = DecisionTree(root_node=root_node)
     rng = np.random.default_rng()

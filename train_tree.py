@@ -12,18 +12,19 @@ def generate_initial_candidates(number_of_members, depth=1):
     return [grow_random_tree(depth=depth) for _ in range(0, number_of_members)]
 
 def check_basic_reproduction_number(disease_params):
-    beta, vax_rate, mu, c, gamma, delta = disease_params
+    beta, mu, c, gamma, delta = disease_params
+    vax_rate = starting_vax_rate
     threshold_1 = mu*beta/(mu+vax_rate)*(c*mu+gamma+c*delta)/((mu+gamma)*(mu+delta))
     threshold_2 = c*beta*mu/((mu+vax_rate)*(2*mu+delta+gamma))
     return [threshold_1, threshold_2]
 
 # yields the average score of a tree on num_simulations disease outbreaks, used to sort trees
 def tree_training_score(candidate_tree):
-    score = 0
+    scores = []
     for _ in range(0, num_simulations):
         one_sim_score, _ = score_tree(candidate_tree)
-        score += one_sim_score
-    return score/num_simulations
+        scores.append(one_sim_score)
+    return np.mean(scores), np.std(scores)
 
 def optimize(number_of_members, max_rounds, starting_depth=1,
               run_name="temp_experiment", reload=None, round=0):
@@ -64,7 +65,9 @@ def optimize(number_of_members, max_rounds, starting_depth=1,
             print(f"Beginning tree fitness evaluation for round {i} ...")
             
             for candidate in candidate_trees:
-                candidate.__setattr__("training_score", tree_training_score(candidate))
+                raw_score, score_std = tree_training_score(candidate)
+                candidate.__setattr__("training_score", raw_score)
+                candidate.__setattr__("score_std", score_std)
             
             log.write(f"All trees evaluated, sorting candidates and selecting top choices ...")
             print(f"All trees evaluated, sorting candidates and selecting top choices ...")
@@ -73,6 +76,7 @@ def optimize(number_of_members, max_rounds, starting_depth=1,
 
             # quickly measure average fitness of top candidates for convergence and save trees
             fitness_check = 0
+            spread = 0
             new_ids = []
             tree_depths = []
             round_folder = os.path.join(run_home_folder, f"round_{i}")
@@ -80,13 +84,20 @@ def optimize(number_of_members, max_rounds, starting_depth=1,
 
             for tree_index, curr_tree in enumerate(candidate_trees):
                 fitness_check += curr_tree.training_score
+                spread += curr_tree.score_std
                 curr_tree.save(os.path.join(round_folder, f"tree_{tree_index}.pkl"))
                 new_ids.append(curr_tree.ID)
                 tree_depths.append(curr_tree.depth)
             
+            # average the results over all trees
             fitness_check /= top_choices
+            spread /= top_choices
+
             log.write(f"Average fitness of top {top_choices}/{number_of_members} members: {fitness_check}")
             print(f"Average fitness of top {top_choices}/{number_of_members} members: {fitness_check}")
+
+            log.write(f"Average standard dev of training runs: {spread}")
+            print(f"Average standard dev of training runs: {spread}")
 
             new_ids = set(new_ids)
             tree_persistence = 100*len(old_ids & new_ids)/len(new_ids)
@@ -110,6 +121,8 @@ def optimize(number_of_members, max_rounds, starting_depth=1,
                 Child.mutate_tree(threshold_mutation_probability*threshold_attenuation**i,
                                 decision_mutation_probability*decision_attenuation**i,
                                 chop_decision_probability*chop_attenuation**i,
+                                variable_change_probability*var_change_attenuation**i,
+                                action_mutation_probability*action_attenuation**i,
                                 0.2, max_tree_depth-1)
                 candidate_trees.append(Child)
             
@@ -120,4 +133,4 @@ if __name__ == "__main__":
     #warnings.filterwarnings("ignore")
     #thresholds = check_basic_reproduction_number(disease_params)
     #print(f"Threshold 1: {thresholds[0]}, Threshold 2: {thresholds[1]}")
-    optimize(number_of_members, max_rounds, 2, run_name="test_unit_thresholds")
+    optimize(number_of_members, max_rounds, 2, run_name="less_likely_outbreak")
