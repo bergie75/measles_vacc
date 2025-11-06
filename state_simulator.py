@@ -10,13 +10,13 @@ rng = np.random.default_rng()
 
 # the RHS of our compartmental model for disease spread, used in simulate_day
 # we exclude the R category via conservation laws to save compute
-def compartment_rhs(x, t, disease_params, current_vaccination_rate, npi_in_place):
+def compartment_rhs(x, t, disease_params, current_vaccination_rate, current_hes, npi_in_place):
     S,V,E,I = x
     beta, mu, c, gamma, delta = disease_params
     effective_beta = beta*(npi_in_place*npi_modifier + (1-npi_in_place))
 
-    dS_dt = mu*(1-S)-current_vaccination_rate*S-effective_beta*(c*E+I)*S
-    dV_dt = current_vaccination_rate*S-mu*V
+    dS_dt = mu*(1-S)-current_vaccination_rate*(1-current_hes)*S-effective_beta*(c*E+I)*S
+    dV_dt = (1-current_hes)*current_vaccination_rate*S-mu*V
     dE_dt = effective_beta*(c*E+I)*S-(mu+gamma)*E
     dI_dt = gamma*E-(mu+delta)*I
 
@@ -25,8 +25,8 @@ def compartment_rhs(x, t, disease_params, current_vaccination_rate, npi_in_place
 # this method simulates one day of disease spread, given an initial state and
 # an agent's choices for vaccination rate and beta (modified from a base level), as well as other
 # parameters specific to the disease 
-def simulate_day(initial_state, disease_params, current_vaccination_rate, npi_in_place):
-    return odeint(compartment_rhs, initial_state, [0, 1], args=(disease_params, current_vaccination_rate, npi_in_place))[-1,:]
+def simulate_day(initial_state, disease_params, current_vaccination_rate, current_hes, npi_in_place):
+    return odeint(compartment_rhs, initial_state, [0, 1], args=(disease_params, current_vaccination_rate, current_hes, npi_in_place))[-1,:]
 
 def score_tree(candidate_tree, print_check=False):
     if print_check:
@@ -48,6 +48,9 @@ def score_tree(candidate_tree, print_check=False):
 
     # keeps tracks of all decision paths chosen by the tree, useful for data visualization
     decision_paths = []
+
+    # keeps track of all actions, useful for data visualizations
+    event_stream = []
     
     for _ in range(0, max_simulation_depth):
         if not outbreak_has_begun and (rng.uniform() < outbreak_prob):
@@ -58,6 +61,7 @@ def score_tree(candidate_tree, print_check=False):
         # use decision tree to generate a candidate action for the simulation
         proposed_action, proposed_value, decision_path = candidate_tree.evaluate(decision_inputs)
         decision_paths.append(decision_path)
+        event_stream.append([proposed_action, proposed_value])
         
         # use selected action to modify simulation. Need to add check to ensure weird hacks don't emerge
         if proposed_action == "pass":
@@ -105,31 +109,27 @@ def score_tree(candidate_tree, print_check=False):
         # enforce upper limits correctly
         decision_inputs["time_since_wes"] = min(1, decision_inputs["time_since_wes"])
         decision_inputs["time_since_diag"] = min(1, decision_inputs["time_since_diag"])
+
+        # compute cost of vaccine and npi interventions
+        current_hes = vax_hes_level(decision_inputs["current_diag"],
+                                               decision_inputs["current_wes"],
+                                               decision_inputs["time_since_diag"],
+                                               decision_inputs["time_since_wes"])
         
         # hard check to ensure no numerical leaking, even though none sick is a fixed point
         if outbreak_has_begun:
-            population_state = simulate_day(population_state, disease_params, current_vaccination_rate, npi_in_place)
+            population_state = simulate_day(population_state, disease_params, current_vaccination_rate, current_hes, npi_in_place)
         
-        # compute cost of vaccine and npi interventions
-        cost_per_vax = cost_vax_level(decision_inputs["current_diag"],
-                                               decision_inputs["current_wes"],
-                                               decision_inputs["time_since_diag"],
-                                               decision_inputs["time_since_wes"])
-        
-        cost_of_npi = cost_npi_level(decision_inputs["current_diag"],
-                                               decision_inputs["current_wes"],
-                                               decision_inputs["time_since_diag"],
-                                               decision_inputs["time_since_wes"])
-        
-        # add running totals
+        # add costs of running totals
         tree_score += (cost_per_exposed*population_state[2]+cost_per_infected*population_state[3])*max_pop
         tree_score += cost_per_vax*current_vaccination_rate+cost_of_npi*npi_in_place
     
-    return tree_score, decision_paths
+    return tree_score, decision_paths, event_stream
 
 def tree_decision_plots(Tree, min_day=0, max_day=max_simulation_depth):
-    sample_score, decision_path_samples = score_tree(Tree)
+    sample_score, decision_path_samples, event_stream = score_tree(Tree)
     selected_samples = decision_path_samples[min_day:max_day]
+    selected_events = event_stream[min_day:max_day]
     path_frequencies = dict(Counter(selected_samples).most_common())
 
     print(f"Sample score: {sample_score}\n")
@@ -138,6 +138,15 @@ def tree_decision_plots(Tree, min_day=0, max_day=max_simulation_depth):
         if path_frequencies[key] > 0:
             print(f"{key} : {path_frequencies[key]}")
 
-    plt.bar(range(len(path_frequencies)), list(path_frequencies.values()), align='center')
-    plt.xticks(range(len(path_frequencies)), range(len(path_frequencies)))
+    current_vax = starting_vax_rate
+    vax_rates = []
+    
+    for event in selected_events:
+        # check to see if vaccination rate changes
+        if event[0] == "set_vax_rate":
+            current_vax = event[1]
+        vax_rates.append(current_vax)
+    
+    plt.plot(vax_rates)
+    plt.title("Change in vaccination rates over sample run")
     plt.show()
