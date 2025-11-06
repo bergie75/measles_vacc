@@ -13,6 +13,7 @@ action_set = ["set_vax_rate",
 # these actions will generate a proposed value, which must be set
 actions_requiring_values = ["set_vax_rate"]
 
+# describes the variables the decision tree can use
 simulation_outputs = ["time_since_diag", "time_since_wes", "current_diag", "current_wes"]
 
 # affect measurements
@@ -38,46 +39,34 @@ npi_modifier = 0.5
 outbreak_prob=1/150
 maximal_initial_exposed=1
 
-# vax cost parameters
-max_cost_per_vax = 1000
-min_cost_per_vax = 0
+# vax hesitancy parameters
 response_to_diag = 100
 response_to_wes = 100
 diag_info_decay_rate = -np.log(2)/4  # how long before the case count is considered half as impactful
 wes_info_decay_rate = -np.log(2)/4  # how long before the case count is considered half as impactful
+max_hes_frac = 1  # what fraction of the population could become hesitant
 
 # cost functions for more complicated interventions
-def cost_vax_level(current_diag, current_wes, time_since_diag, time_since_wes):
+def vax_hes_level(current_diag, current_wes, time_since_diag, time_since_wes):
     wes_impact = response_to_wes*current_wes*np.exp(wes_info_decay_rate*time_since_wes*max_simulation_depth)
     diag_impact = response_to_diag*current_diag*np.exp(diag_info_decay_rate*time_since_diag*max_simulation_depth)
-    # an interpolation parameter to go between maximum and minimum costs
-    t = np.tanh((wes_impact+diag_impact)*max_pop)  #argument greater than or equal to zero
+    # level of vaccine hesitancy
+    hes_level = max_hes_frac*(1-np.tanh((wes_impact+diag_impact)*max_pop))  #argument greater than or equal to zero
 
-    return t*min_cost_per_vax + (1-t)*max_cost_per_vax
-
-# vax cost parameters
-max_cost_of_npi = 1000
-min_cost_of_npi = 1000
-
-# cost functions for more complicated interventions
-def cost_npi_level(current_diag, current_wes, time_since_diag, time_since_wes):
-    wes_impact = response_to_wes*current_wes*np.exp(wes_info_decay_rate*time_since_wes*max_simulation_depth)
-    diag_impact = response_to_diag*current_diag*np.exp(diag_info_decay_rate*time_since_diag*max_simulation_depth)
-    # an interpolation parameter to go between maximum and minimum costs
-    t = np.tanh((wes_impact+diag_impact)*max_pop)  #argument greater than or equal to zero
-
-    return t*min_cost_of_npi + (1-t)*max_cost_of_npi
+    return hes_level
 
 # costs of various actions
+cost_per_vax = 100
 cost_per_diag_measurement = 1
 cost_per_wes_measurement = 0.5
 cost_per_infected = 1000
 cost_per_exposed = 1000
+cost_of_npi = 1000
 cost_of_opening_wes_site = 0
 
 # parameters to control the genetic algorithm
-num_simulations = 120
-max_tree_depth = 5
+num_simulations = 75
+max_tree_depth = 4
 number_of_members = 250
 top_choices = 25
 max_rounds = 200

@@ -22,7 +22,7 @@ def check_basic_reproduction_number(disease_params):
 def tree_training_score(candidate_tree):
     scores = []
     for _ in range(0, num_simulations):
-        one_sim_score, _ = score_tree(candidate_tree)
+        one_sim_score, _, _ = score_tree(candidate_tree)
         scores.append(one_sim_score)
     return np.mean(scores), np.std(scores)
 
@@ -136,4 +136,5 @@ if __name__ == "__main__":
     #warnings.filterwarnings("ignore")
     #thresholds = check_basic_reproduction_number(disease_params)
     #print(f"Threshold 1: {thresholds[0]}, Threshold 2: {thresholds[1]}")
-    pass
+    reload = os.path.join("custom_starting_ensembles", "first_handcrafted")
+    optimize(number_of_members, max_rounds, 2, reload=reload, run_name="test_costless_hes")
