@@ -346,6 +346,18 @@ def load_tree(proj_folder="measles_vacc", sub_folder="", filename="default_tree.
     
     return loaded_tree
 
+# a function for backwards compatibility, adds an in_patch value of 0
+# to each node in a tree for single patch trees trained on old code
+def add_patch_to_tree(Tree):
+    def node_fix(Node):
+        Node.__setattr__("in_patch", 0)
+        if Node.left_child is not None:
+            node_fix(Node.left_child)
+        if Node.right_child is not None:
+            node_fix(Node.right_child)
+    
+    node_fix(Tree.root_node)
+
 def visualize_tree(Tree, filename, proj_folder="measles_vacc", sub_folder=""):
     starting_point=8*2**Tree.depth
     blank_line = [" "]*max(128, 4*starting_point)
