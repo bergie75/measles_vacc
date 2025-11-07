@@ -12,11 +12,13 @@ import networkx as nx
 import matplotlib.pyplot as plt
 
 class Node:
-    def __init__(self, action=None, action_value = None, decision_var=None, threshold=None,
+    def __init__(self, action=None, action_value = None, in_patch = 0,
+                  decision_var=None, threshold=None,
                   left_child=None, right_child=None):
         
         self.action = action
         self.action_value = action_value
+        self.in_patch = in_patch
         self.decision_var = decision_var
         self.threshold = threshold
         self.left_child = left_child
@@ -26,16 +28,19 @@ class Node:
     def __repr__(self):
         if self.action is not None:
             if self.action_value is not None:
-                return f"{self.action}: {self.action_value}"
+                return f"{self.action}: {self.action_value} in {self.in_patch}"
             else:
                 return self.action
         elif (self.threshold is not None) and (self.decision_var is not None):
-            return f"{self.decision_var} <= {self.threshold:0.3f}"
+            return f"{self.decision_var} in {self.in_patch} <= {self.threshold:0.3f}"
         else:
             return "ERROR: malformed node"
 
     def terminal_leaf(self):
         return (self.action is not None)
+    
+    def mutate_patch(self):
+        self.in_patch = np.random.choice(range(0, num_patches))
     
     # defaults to taking a new value between 80% and 120% of old value
     def mutate_threshold(self, max_perc_change=0.2):
@@ -59,11 +64,11 @@ class Node:
         threshold = rng.uniform()
 
         # create children, checking if an action value is needed
-        left_child = Node(action=random.choice(action_set))
+        left_child = Node(action=random.choice(action_set), in_patch=np.random.choice(range(0, num_patches)))
         if left_child.action in actions_requiring_values:
             left_child.__setattr__("action_value", rng.uniform())
         
-        right_child = Node(action=random.choice(action_set))
+        right_child = Node(action=random.choice(action_set), in_patch=np.random.choice(range(0, num_patches)))
         if right_child.action in actions_requiring_values:
             right_child.__setattr__("action_value", rng.uniform())
 
@@ -88,9 +93,13 @@ class Node:
         self.left_child = None
         self.right_child = None
     
-    def chain_mutation(self, thresh_prob, decision_prob, chop_prob, var_change_prob,
+    def chain_mutation(self, patch_prob, thresh_prob, decision_prob, chop_prob, var_change_prob,
                         action_prob, max_perc_change, depth_remaining):
         rng = np.random.default_rng()
+        
+        # check for patch change mutation
+        if rng.uniform() < patch_prob:
+            self.mutate_patch()
         
         # if node is a leaf, potentially turn into a decision node. Checks if depth requirements
         # are violated so that the depth of a tree can be capped. Check leaves first so as not to undo
@@ -113,18 +122,19 @@ class Node:
           
         # check for children that are not None. If children exist, determine their mutations
         if self.left_child is not None:
-            self.left_child.chain_mutation(thresh_prob, decision_prob, chop_prob, var_change_prob,
+            self.left_child.chain_mutation(patch_prob, thresh_prob, decision_prob, chop_prob, var_change_prob,
                         action_prob, max_perc_change, depth_remaining-1)
         if self.right_child is not None:
-            self.right_child.chain_mutation(thresh_prob, decision_prob, chop_prob, var_change_prob,
+            self.right_child.chain_mutation(patch_prob, thresh_prob, decision_prob, chop_prob, var_change_prob,
                         action_prob, max_perc_change, depth_remaining-1)
     
     def trim_node(self):
         # checks to see if both actions recommended in node are the same
         # if yes, the check is pointless and the node becomes a leaf
         if self.left_child is not None and self.right_child is not None:
-            if (self.left_child.action is not None) and (self.left_child.action == self.right_child.action) and not (self.left_child.action in actions_requiring_values):
+            if (self.left_child.action is not None) and (self.left_child.action == self.right_child.action) and (self.left_child.in_patch == self.right_child.in_patch) and not (self.left_child.action in actions_requiring_values):
                 self.action = self.left_child.action
+                self.in_patch = self.left_child.in_patch
                 self.decision_var = None
                 self.threshold = None
                 self.left_child = None
@@ -141,15 +151,15 @@ class Node:
     def evaluate(self, inputs, dec_path=""):
         # terminal condition to end the recursion
         if self.terminal_leaf():
-            modded_dec_path = dec_path + f"_[{self.action}: {self.action_value}]"
-            return self.action, self.action_value, modded_dec_path
+            modded_dec_path = dec_path + f"_[{self.action} in {self.in_patch}: {self.action_value}]"
+            return self.action, self.action_value, self.in_patch, modded_dec_path
         
         # check threshold to determine the branch to follow, uses dictionary structure of inputs
-        if inputs[self.decision_var] <= self.threshold:
-            modded_dec_path = dec_path + f"_[{self.decision_var}<={self.threshold:.2f}]"
+        if inputs[self.decision_var][self.in_patch] <= self.threshold:
+            modded_dec_path = dec_path + f"_[{self.decision_var} in {self.in_patch}<={self.threshold:.2f}]"
             return self.left_child.evaluate(inputs, dec_path=modded_dec_path)
         else:
-            modded_dec_path = dec_path + f"_[{self.decision_var}>{self.threshold:.2f}]"
+            modded_dec_path = dec_path + f"_[{self.decision_var} in {self.in_patch}>{self.threshold:.2f}]"
             return self.right_child.evaluate(inputs, dec_path=modded_dec_path)
     
     def reset_calls_recursive(self):
@@ -207,10 +217,10 @@ class DecisionTree:
         if attribute_name == "left_child" or attribute_name == "right_child":
             self.update_directory_and_depth()
     
-    def mutate_tree(self, thresh_prob, decision_prob, chop_prob, var_change_prob,
+    def mutate_tree(self, patch_prob, thresh_prob, decision_prob, chop_prob, var_change_prob,
                         action_prob, max_perc_change, depth_remaining):
         
-        self.root_node.chain_mutation(thresh_prob, decision_prob, chop_prob, var_change_prob,
+        self.root_node.chain_mutation(patch_prob, thresh_prob, decision_prob, chop_prob, var_change_prob,
                         action_prob, max_perc_change, depth_remaining)
         self.update_directory_and_depth()
     
@@ -229,14 +239,15 @@ class DecisionTree:
 def copy_node(target_node):
     # base case for recursion
     if target_node.action is not None:
-        return Node(action=target_node.action, action_value=target_node.action_value)
+        return Node(action=target_node.action, action_value=target_node.action_value, in_patch=target_node.in_patch)
     else:
         decision_var = target_node.decision_var
         threshold = target_node.threshold
+        in_patch = target_node.in_patch
         left_child = copy_node(target_node.left_child)
         right_child = copy_node(target_node.right_child)
         
-        return Node(decision_var=decision_var, threshold=threshold,
+        return Node(decision_var=decision_var, threshold=threshold, in_patch=in_patch,
                     left_child=left_child, right_child=right_child)
 
 def copy_tree(target_tree):
@@ -250,9 +261,10 @@ def find_mating_points(Tree1, Tree2):
     for d in range(0, min_depth):
         for index1, Node1 in enumerate(Tree1.directory[d]):
             dec_var = Node1.decision_var
+            in_patch = Node1.in_patch
             # exclude leaf notes from list of possible joins
             if dec_var is not None:
-                mating_points += [[d, index1, index2] for index2, Node2 in enumerate(Tree2.directory[d]) if  Node2.decision_var==dec_var]
+                mating_points += [[d, index1, index2] for index2, Node2 in enumerate(Tree2.directory[d]) if (Node2.decision_var==dec_var and Node2.in_patch==in_patch)]
     
     return mating_points
 
@@ -306,10 +318,10 @@ def mate_trees(Tree1, Tree2):
 def grow_random_tree(depth, grow_probability=1):
     if depth > 1:
         # DO NOT COMBINE THESE TWO LINES. It doesn't work, I don't know why
-        root_node = Node()
+        root_node = Node(in_patch=np.random.choice(range(0, num_patches)))
         root_node.mutate_into_decision_node()
     else:
-        root_node = Node(action=random.choice(action_set))
+        root_node = Node(action=random.choice(action_set), in_patch=np.random.choice(range(0, num_patches)))
         if root_node.action in actions_requiring_values:
             root_node.__setattr__("action_value", rng.uniform())
     
@@ -320,6 +332,7 @@ def grow_random_tree(depth, grow_probability=1):
         for leaf in current_leaves:
             if rng.uniform() <= grow_probability:
                 leaf.mutate_into_decision_node()
+                leaf.__setattr__("in_patch", np.random.choice(range(0, num_patches)))
         # only update directory at the end of the loop to save time
         dec_tree.update_directory_and_depth()
     

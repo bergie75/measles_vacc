@@ -121,7 +121,8 @@ def optimize(number_of_members, max_rounds, starting_depth=1,
                 # recall that if trees can't be mated, the parents are returned as choices
                 Child = np.random.choice(mate_trees(Parent1, Parent2))
                 # double check the depth restriction here
-                Child.mutate_tree(threshold_mutation_probability*threshold_attenuation**i,
+                Child.mutate_tree(patch_mutation_probability*patch_attenuation**i,
+                                threshold_mutation_probability*threshold_attenuation**i,
                                 decision_mutation_probability*decision_attenuation**i,
                                 chop_decision_probability*chop_attenuation**i,
                                 variable_change_probability*var_change_attenuation**i,
@@ -137,4 +138,4 @@ if __name__ == "__main__":
     #thresholds = check_basic_reproduction_number(disease_params)
     #print(f"Threshold 1: {thresholds[0]}, Threshold 2: {thresholds[1]}")
     reload = os.path.join("custom_starting_ensembles", "first_handcrafted")
-    optimize(number_of_members, max_rounds, 2, reload=reload, run_name="less_infection_cost_less_response")
+    optimize(number_of_members, max_rounds, 2, run_name="test_multipatch")
