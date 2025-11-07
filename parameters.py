@@ -40,8 +40,8 @@ outbreak_prob=1/150
 maximal_initial_exposed=1
 
 # vax hesitancy parameters
-response_to_diag = 100
-response_to_wes = 100
+response_to_diag = 0.1
+response_to_wes = 0.1
 diag_info_decay_rate = -np.log(2)/4  # how long before the case count is considered half as impactful
 wes_info_decay_rate = -np.log(2)/4  # how long before the case count is considered half as impactful
 max_hes_frac = 1  # what fraction of the population could become hesitant
@@ -59,8 +59,8 @@ def vax_hes_level(current_diag, current_wes, time_since_diag, time_since_wes):
 cost_per_vax = 100
 cost_per_diag_measurement = 1
 cost_per_wes_measurement = 0.5
-cost_per_infected = 1000
-cost_per_exposed = 1000
+cost_per_infected = 1
+cost_per_exposed = 0
 cost_of_npi = 1000
 cost_of_opening_wes_site = 0
 
