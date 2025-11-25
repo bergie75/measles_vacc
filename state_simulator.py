@@ -53,20 +53,67 @@ def compartment_rhs_multi_patch(x, t,
 def simulate_day(initial_state, disease_params, current_vaccination_rate, current_hes, npi_in_place):
     return odeint(compartment_rhs_multi_patch, initial_state, [0, 1], args=(disease_params, current_vaccination_rate, current_hes, npi_in_place, num_patches))[-1,:]
 
-def score_tree(candidate_tree, print_check=False):
-    if print_check:
-        print(f"{rng.uniform()}\n")
+def take_measurements(day, testing_schedule, decision_inputs, population_state, wastewater_used):
+    # calculates how much is spent due to testing schedule
+    costs_accrued = 0
+
+    for in_patch in range(0, num_patches):
+        # increment counters for measurements. If measurements are taken, they will be reset to zero anyway
+        decision_inputs["time_since_diag"][in_patch] += 1
+        decision_inputs["time_since_wes"][in_patch] += 1
+        
+        # extract testing schedule for the current patch
+        diag_period = testing_schedule["diag_period"][in_patch]
+        wes_period = testing_schedule["wes_period"][in_patch]
+
+        if day % diag_period == 0:
+            costs_accrued += cost_per_diag_measurement[in_patch]
+            decision_inputs["time_since_diag"][in_patch] = 0
+            decision_inputs["current_diag"][in_patch] = infected_seeking_care_frac[in_patch]*population_state[in_patch+3*num_patches]
+
+        if day % wes_period == 0:
+            costs_accrued += cost_per_wes_measurement[in_patch]
+            decision_inputs["time_since_wes"][in_patch] = 0
+            # if wastewater treatment plant has not been used to sample yet, add additional
+            # 1-time cost
+            if not wastewater_used[in_patch]:
+                costs_accrued += cost_of_opening_wes_site[in_patch]
+                wastewater_used[in_patch] = True
+            
+            # generate a noisy wastewater sample by exponentiating a lognormal sample (guarantees nonnegative)
+            if population_state[in_patch+2*num_patches] > 0:
+                measurement_mean = np.log(population_state[in_patch+2*num_patches]*max_pop[in_patch])
+                decision_inputs["current_wes"][in_patch] = np.exp(rng.normal(measurement_mean, wes_std_frac[in_patch]*np.abs(measurement_mean)))/max_pop[in_patch]
+            else:
+                decision_inputs["current_wes"][in_patch] = 0
+
+    # enforce upper limits correctly after incrementing counter
+    decision_inputs["time_since_wes"][in_patch] = min(max_simulation_depth, decision_inputs["time_since_wes"][in_patch])
+    decision_inputs["time_since_diag"][in_patch] = min(max_simulation_depth, decision_inputs["time_since_diag"][in_patch])
     
+    return costs_accrued   
+
+def affect_simulation(proposed_action, proposed_value, in_patch,
+                      current_vaccination_rate, npi_in_place):
+    
+    # use selected action to modify simulation. Need to add check to ensure weird hacks don't emerge        
+    if proposed_action == "set_vax_rate":
+        current_vaccination_rate[in_patch] = proposed_value*max_vax_rate[in_patch]
+    
+    elif proposed_action == "apply_npi":
+        npi_in_place[in_patch] = True
+    
+    elif proposed_action == "remove_npi":
+        npi_in_place[in_patch] = False
+
+def score_tree(candidate_tree, testing_schedule=default_schedule):
     # initialize a simulation
     outbreak_has_begun = False
     wastewater_used = [False]*num_patches
     npi_in_place = [False]*num_patches
     current_vaccination_rate = starting_vax_rate
     population_state = np.concatenate((np.ones(num_patches), np.zeros(3*num_patches)))
-    decision_inputs = {"time_since_diag": np.ones(num_patches),
-                    "time_since_wes": np.ones(num_patches),
-                      "current_diag": np.zeros(num_patches),
-                        "current_wes": np.zeros(num_patches)}
+    decision_inputs = dict(zip(simulation_outputs, starting_values))
 
     # results to return, keeps running totals on costs accrued by tree
     tree_score = 0
@@ -77,7 +124,7 @@ def score_tree(candidate_tree, print_check=False):
     # keeps track of all actions, useful for data visualizations
     event_stream = []
     
-    for _ in range(0, max_simulation_depth):
+    for day in range(0, max_simulation_depth):
         if not outbreak_has_begun and (rng.uniform() < outbreak_prob):
             outbreak_has_begun = True
             initial_exposed_pop = np.random.choice(range(1, 1+maximal_initial_exposed))
@@ -91,51 +138,12 @@ def score_tree(candidate_tree, print_check=False):
         decision_paths.append(decision_path)
         event_stream.append([proposed_action, proposed_value, in_patch])
         
-        # use selected action to modify simulation. Need to add check to ensure weird hacks don't emerge        
-        if proposed_action == "set_vax_rate":
-            current_vaccination_rate[in_patch] = proposed_value*max_vax_rate[in_patch]
+        # summary function used to decide how the simulation outputs and planner policy changes
+        # relevant variables
+        affect_simulation(proposed_action, proposed_value, in_patch, current_vaccination_rate, npi_in_place)
         
-        elif proposed_action == "apply_npi":
-            npi_in_place[in_patch] = True
-        
-        elif proposed_action == "remove_npi":
-            npi_in_place[in_patch] = False
-        
-        elif proposed_action == "diagnostic_measurement":
-            tree_score += cost_per_diag_measurement[in_patch]
-            decision_inputs["current_diag"][in_patch] = infected_seeking_care_frac[in_patch]*population_state[in_patch+3*num_patches]
-        
-        elif proposed_action == "wes_measurement":
-            tree_score += cost_per_wes_measurement[in_patch]
-            # if wastewater treatment plant has not been used to sample yet, add additional
-            # 1-time cost
-            if not wastewater_used[in_patch]:
-                tree_score += cost_of_opening_wes_site[in_patch]
-                wastewater_used[in_patch] = True
-            
-            # generate a noisy wastewater sample by exponentiating a lognormal sample (guarantees nonnegative)
-            if population_state[in_patch+2*num_patches] > 0:
-                measurement_mean = np.log(population_state[in_patch+2*num_patches]*max_pop[in_patch])
-                decision_inputs["current_wes"][in_patch] = np.exp(rng.normal(measurement_mean,wes_std_frac[in_patch]*np.abs(measurement_mean)))/max_pop[in_patch]
-            else:
-                decision_inputs["current_wes"][in_patch] = 0
-        
-        # update counters on surveillance for all patches
-        # loop through all patches, treating the affected one differently
-        for i in range(0, num_patches):
-            if in_patch != i or (proposed_action not in ["wes_measurement", "diagnostic_measurement"]):
-                decision_inputs["time_since_diag"][i] += 1/max_simulation_depth
-                decision_inputs["time_since_wes"][i] += 1/max_simulation_depth
-            elif proposed_action == "wes_measurement":
-                decision_inputs["time_since_diag"][i] += 1/max_simulation_depth
-                decision_inputs["time_since_wes"][i] = 0
-            elif proposed_action == "diagnostic_measurement":
-                decision_inputs["time_since_diag"][i] = 0
-                decision_inputs["time_since_wes"] += 1/max_simulation_depth
-        
-            # enforce upper limits correctly after incrementing counter
-            decision_inputs["time_since_wes"][i] = min(1, decision_inputs["time_since_wes"][i])
-            decision_inputs["time_since_diag"][i] = min(1, decision_inputs["time_since_diag"][i])
+        # take measurements, to be used on the next day
+        tree_score += take_measurements(day, testing_schedule, decision_inputs, population_state, wastewater_used)
 
         # compute cost of vaccine and npi interventions
         current_hes = vax_hes_level(decision_inputs)
@@ -166,14 +174,15 @@ def tree_decision_plots(Tree, min_day=0, max_day=max_simulation_depth):
             print(f"{key} : {path_frequencies[key]}")
 
     current_vax = starting_vax_rate
-    vax_rates = []
+    vax_rates = [[]*num_patches]
     
     for event in selected_events:
-        # check to see if vaccination rate changes
         if event[0] == "set_vax_rate":
-            current_vax = event[1]
-        vax_rates.append(current_vax)
+            current_vax[event[2]] = event[1]
+        for i in range(0, num_patches):
+            vax_rates[i].append(current_vax[i])
     
-    plt.plot(vax_rates)
+    for i in range(0, num_patches):
+        plt.plot(vax_rates[i])
     plt.title("Change in vaccination rates over sample run")
     plt.show()

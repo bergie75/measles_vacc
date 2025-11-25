@@ -19,14 +19,14 @@ def check_basic_reproduction_number(disease_params):
     return [threshold_1, threshold_2]
 
 # yields the average score of a tree on num_simulations disease outbreaks, used to sort trees
-def tree_training_score(candidate_tree):
+def tree_training_score(candidate_tree, schedule=default_schedule):
     scores = []
     for _ in range(0, num_simulations):
-        one_sim_score, _, _ = score_tree(candidate_tree)
+        one_sim_score, _, _ = score_tree(candidate_tree, schedule)
         scores.append(one_sim_score)
     return np.mean(scores), np.std(scores)
 
-def optimize(number_of_members, max_rounds, starting_depth=1,
+def optimize(number_of_members, max_rounds, starting_depth=1, schedule=default_schedule,
               run_name="temp_experiment", reload=None, round=0):
     
     # create folder to save the run
@@ -68,7 +68,7 @@ def optimize(number_of_members, max_rounds, starting_depth=1,
             print(f"Beginning tree fitness evaluation for round {i} ...")
             
             for candidate in candidate_trees:
-                raw_score, score_std = tree_training_score(candidate)
+                raw_score, score_std = tree_training_score(candidate, schedule=schedule)
                 candidate.__setattr__("training_score", raw_score)
                 candidate.__setattr__("score_std", score_std)
             
@@ -137,5 +137,5 @@ if __name__ == "__main__":
     #warnings.filterwarnings("ignore")
     #thresholds = check_basic_reproduction_number(disease_params)
     #print(f"Threshold 1: {thresholds[0]}, Threshold 2: {thresholds[1]}")
-    reload = os.path.join("custom_starting_ensembles", "first_handcrafted")
-    optimize(number_of_members, max_rounds, 2, run_name="test_multipatch")
+    #reload = os.path.join("custom_starting_ensembles", "first_handcrafted")
+    optimize(number_of_members, max_rounds, 2, run_name="separated_scheduling", schedule=default_schedule)

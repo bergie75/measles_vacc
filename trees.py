@@ -355,8 +355,11 @@ def add_patch_to_tree(Tree):
             node_fix(Node.left_child)
         if Node.right_child is not None:
             node_fix(Node.right_child)
+        
+        return Node
     
-    node_fix(Tree.root_node)
+    new_root = node_fix(Tree.root_node)
+    return DecisionTree(root_node=new_root)
 
 def visualize_tree(Tree, filename, proj_folder="measles_vacc", sub_folder=""):
     starting_point=8*2**Tree.depth

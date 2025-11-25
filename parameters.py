@@ -6,16 +6,19 @@ max_pop = [5000]
 num_patches = 1
 
 # possible actions and thresholds for decision trees
-action_set = ["set_vax_rate",
-               "apply_npi", "remove_npi",
-               "diagnostic_measurement", "wes_measurement",
-               "pass"]
+action_set = ["set_vax_rate", "apply_npi", "remove_npi",]
 
 # these actions will generate a proposed value, which must be set
 actions_requiring_values = ["set_vax_rate"]
 
 # describes the variables the decision tree can use
 simulation_outputs = ["time_since_diag", "time_since_wes", "current_diag", "current_wes"]
+starting_values = [[max_simulation_depth]*num_patches, [max_simulation_depth]*num_patches, np.zeros(num_patches), np.zeros(num_patches)]
+
+# default measurement schedule, test every day in each patch
+default_schedule = {}
+default_schedule["wes_period"] = [1]*num_patches
+default_schedule["diag_period"] = [1]*num_patches
 
 # affect measurements
 wes_std_frac = [0.001]  # determines how noisy wastewater surveillance is
