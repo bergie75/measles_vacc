@@ -43,7 +43,7 @@ class Node:
         self.in_patch = np.random.choice(range(0, num_patches))
     
     # defaults to taking a new value between 80% and 120% of old value
-    def mutate_threshold(self, max_perc_change=0.2):
+    def mutate_threshold(self, max_perc_change=max_mutate_perc):
         rng = np.random.default_rng()
         multiplier = rng.uniform(low=1-max_perc_change, high=1+max_perc_change)
         self.threshold = min(self.threshold*multiplier, 1)
@@ -51,7 +51,7 @@ class Node:
     def mutate_decision_var(self):
         self.decision_var = random.choice(simulation_outputs)
     
-    def mutate_action_value(self, max_perc_change=0.2):
+    def mutate_action_value(self, max_perc_change=max_mutate_perc):
         rng = np.random.default_rng()
         multiplier = rng.uniform(low=1-max_perc_change, high=1+max_perc_change)
         self.action_value = min(self.action_value*multiplier, 1)

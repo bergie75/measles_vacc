@@ -2,8 +2,8 @@ import numpy as np
 
 # other simulation details
 max_simulation_depth = 720
-max_pop = [5000]
-num_patches = 1
+num_patches = 2
+max_pop = [5000]*num_patches
 
 # possible actions and thresholds for decision trees
 action_set = ["set_vax_rate", "apply_npi", "remove_npi",]
@@ -21,15 +21,15 @@ default_schedule["wes_period"] = [1]*num_patches
 default_schedule["diag_period"] = [1]*num_patches
 
 # affect measurements
-wes_std_frac = [0.001]  # determines how noisy wastewater surveillance is
-infected_seeking_care_frac = [0.2]  # what fraction of patients who are infected seek medical attention
+wes_std_frac = [0.001]*num_patches  # determines how noisy wastewater surveillance is
+infected_seeking_care_frac = [0.2]*num_patches  # what fraction of patients who are infected seek medical attention
 
 # disease dynamics parameters
 mu = np.array([0.01]*num_patches)
 c = np.array([0.6]*num_patches)
 gamma = np.array([np.log(2)/3]*num_patches)  # after 3 days, 50% of exposed patients become infected (half life)
 delta = np.array([np.log(2)/3]*num_patches)  # after 3 days, 50% of infected patients have recovered
-beta = np.array([[0.3]])
+beta = np.array([[0.3,0.1],[0.3,0.1]])
 starting_vax_rate = np.array([0.001]*num_patches)
 disease_params = [beta,mu,c,gamma,delta]
 
@@ -40,7 +40,7 @@ max_vax_rate = [1]*num_patches
 npi_modifier = 0.5
 
 # set outbreak initial conditions
-outbreak_prob=1/150
+outbreak_prob=1/75
 maximal_initial_exposed=1
 
 # vax hesitancy parameters
@@ -68,7 +68,7 @@ def vax_hes_level(decision_inputs):
     return hes_level
 
 # costs of various actions
-cost_per_vax = [100]*num_patches
+cost_per_vax = [500, 100]
 cost_per_diag_measurement = [1]*num_patches
 cost_per_wes_measurement = [0.5]*num_patches
 cost_per_infected = [1]*num_patches
@@ -77,13 +77,15 @@ cost_of_npi = [1000]*num_patches
 cost_of_opening_wes_site = [0]*num_patches
 
 # parameters to control the genetic algorithm
-num_simulations = 75
+num_simulations = 50
 max_tree_depth = 4
 number_of_members = 250
 top_choices = 25
 max_rounds = 200
 
 # controls mutations in trees
+max_mutate_perc = 1
+
 threshold_mutation_probability = 0.9
 threshold_attenuation = 0.98
 

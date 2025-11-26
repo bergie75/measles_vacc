@@ -138,4 +138,4 @@ if __name__ == "__main__":
     #thresholds = check_basic_reproduction_number(disease_params)
     #print(f"Threshold 1: {thresholds[0]}, Threshold 2: {thresholds[1]}")
     #reload = os.path.join("custom_starting_ensembles", "first_handcrafted")
-    optimize(number_of_members, max_rounds, 2, run_name="separated_scheduling", schedule=default_schedule)
+    optimize(number_of_members, max_rounds, 2, run_name="try_2", schedule=default_schedule)

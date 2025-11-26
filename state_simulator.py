@@ -40,9 +40,9 @@ def compartment_rhs_multi_patch(x, t,
             either_npi = npi_in_place[i] or npi_in_place[j]
             effective_beta[i,j] = beta[i,j]*(either_npi*npi_modifier + (1-either_npi))
 
-    dS_dt = mu*(1-S)-current_vaccination_rate*(1-current_hes)*S-np.matmul(effective_beta,(c*E+I)*S)
+    dS_dt = mu*(1-S)-current_vaccination_rate*(1-current_hes)*S-np.matmul(effective_beta,(c*E+I))*S
     dV_dt = (1-current_hes)*current_vaccination_rate*S-mu*V
-    dE_dt = np.matmul(effective_beta,(c*E+I)*S)-(mu+gamma)*E
+    dE_dt = np.matmul(effective_beta,(c*E+I))*S-(mu+gamma)*E
     dI_dt = gamma*E-(mu+delta)*I
 
     return np.concatenate((dS_dt, dV_dt, dE_dt, dI_dt))
@@ -130,8 +130,8 @@ def score_tree(candidate_tree, testing_schedule=default_schedule):
             initial_exposed_pop = np.random.choice(range(1, 1+maximal_initial_exposed))
             initial_patch = np.random.choice(range(0, num_patches))
             # update susceptible and exposed category of relevant patch
-            population_state[initial_patch] -= initial_exposed_pop/max_pop
-            population_state[initial_patch + num_patches*2] += initial_exposed_pop/max_pop
+            population_state[initial_patch] -= initial_exposed_pop/max_pop[initial_patch]
+            population_state[initial_patch + num_patches*2] += initial_exposed_pop/max_pop[initial_patch]
 
         # use decision tree to generate a candidate action for the simulation
         proposed_action, proposed_value, in_patch, decision_path = candidate_tree.evaluate(decision_inputs)
