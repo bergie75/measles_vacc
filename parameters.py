@@ -29,8 +29,8 @@ mu = np.array([0.01]*num_patches)
 c = np.array([0.6]*num_patches)
 gamma = np.array([np.log(2)/3]*num_patches)  # after 3 days, 50% of exposed patients become infected (half life)
 delta = np.array([np.log(2)/3]*num_patches)  # after 3 days, 50% of infected patients have recovered
-beta = np.array([[0.3,0.1],[0.3,0.1]])
-starting_vax_rate = np.array([0.001]*num_patches)
+beta = np.array([[0.3,0.2],[0.2,0.3]])
+starting_vax_rate = np.array([0.0]*num_patches)
 disease_params = [beta,mu,c,gamma,delta]
 
 # describes the overall range of choices on vaccination
@@ -44,8 +44,8 @@ outbreak_prob=1/75
 maximal_initial_exposed=1
 
 # vax hesitancy parameters
-response_to_diag = 0.1*np.eye(num_patches)
-response_to_wes = 0.1*np.eye(num_patches)
+response_to_diag = 0.005*np.eye(num_patches)
+response_to_wes = 0.005*np.eye(num_patches)
 diag_info_decay_rate = np.array([-np.log(2)/4]*num_patches)  # how long before the case count is considered half as impactful
 wes_info_decay_rate = np.array([-np.log(2)/4]*num_patches)  # how long before the case count is considered half as impactful
 max_hes_frac = np.array([1]*num_patches)  # what fraction of the population could become hesitant
@@ -68,7 +68,7 @@ def vax_hes_level(decision_inputs):
     return hes_level
 
 # costs of various actions
-cost_per_vax = [500, 100]
+cost_per_vax = [1000, 100]
 cost_per_diag_measurement = [1]*num_patches
 cost_per_wes_measurement = [0.5]*num_patches
 cost_per_infected = [1]*num_patches
@@ -86,13 +86,13 @@ max_rounds = 200
 # controls mutations in trees
 max_mutate_perc = 1
 
-threshold_mutation_probability = 0.9
+threshold_mutation_probability = 0.99
 threshold_attenuation = 0.98
 
-action_mutation_probability = 0.9
+action_mutation_probability = 0.4
 action_attenuation = 0.98
 
-decision_mutation_probability = 0.2
+decision_mutation_probability = 0.5
 decision_attenuation = 0.98
 
 variable_change_probability = 0.15
@@ -101,5 +101,5 @@ var_change_attenuation = 0.98
 chop_decision_probability = 0.01
 chop_attenuation = 1.01
 
-patch_mutation_probability = 0.2
+patch_mutation_probability = 0.05
 patch_attenuation = 0.98

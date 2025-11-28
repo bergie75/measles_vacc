@@ -174,7 +174,7 @@ def tree_decision_plots(Tree, min_day=0, max_day=max_simulation_depth):
             print(f"{key} : {path_frequencies[key]}")
 
     current_vax = starting_vax_rate
-    vax_rates = [[]*num_patches]
+    vax_rates = [[] for _ in range(0, num_patches)]
     
     for event in selected_events:
         if event[0] == "set_vax_rate":
@@ -182,7 +182,12 @@ def tree_decision_plots(Tree, min_day=0, max_day=max_simulation_depth):
         for i in range(0, num_patches):
             vax_rates[i].append(current_vax[i])
     
+    vax_rates = np.array(vax_rates)  # so we can slice this appropriately
+    
+    legend_labels = []
     for i in range(0, num_patches):
         plt.plot(vax_rates[i])
+        legend_labels.append(f"Patch {i}")
     plt.title("Change in vaccination rates over sample run")
+    plt.legend(legend_labels)
     plt.show()
