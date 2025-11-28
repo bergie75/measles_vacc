@@ -61,7 +61,10 @@ class Node:
     def mutate_into_decision_node(self):
         rng = np.random.default_rng()
         decision_var = random.choice(simulation_outputs)
-        threshold = rng.uniform()
+        if use_beta_generation:
+            threshold = rng.beta(dist_alpha, dist_beta)
+        else:
+            threshold = rng.uniform()
 
         # create children, checking if an action value is needed
         left_child = Node(action=random.choice(action_set), in_patch=np.random.choice(range(0, num_patches)))

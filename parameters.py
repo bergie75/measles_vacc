@@ -25,7 +25,7 @@ wes_std_frac = [0.001]*num_patches  # determines how noisy wastewater surveillan
 infected_seeking_care_frac = [0.2]*num_patches  # what fraction of patients who are infected seek medical attention
 
 # disease dynamics parameters
-mu = np.array([0.01]*num_patches)
+mu = np.array([0.1]*num_patches)
 c = np.array([0.6]*num_patches)
 gamma = np.array([np.log(2)/3]*num_patches)  # after 3 days, 50% of exposed patients become infected (half life)
 delta = np.array([np.log(2)/3]*num_patches)  # after 3 days, 50% of infected patients have recovered
@@ -82,6 +82,11 @@ max_tree_depth = 4
 number_of_members = 250
 top_choices = 25
 max_rounds = 200
+
+# controls bias in tree formation towards lower threshold values
+use_beta_generation = True
+dist_alpha = 1
+dist_beta = 19
 
 # controls mutations in trees
 max_mutate_perc = 1
