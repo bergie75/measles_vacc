@@ -1,7 +1,7 @@
 import numpy as np
 
 # other simulation details
-max_simulation_depth = 720
+max_simulation_depth = 1000
 num_patches = 1
 max_pop = [5000]*num_patches
 
@@ -25,7 +25,7 @@ sia_per_patch = 1
 sia_allowance = [sia_per_patch]*num_patches
 
 # dynamics of an sia
-sia_vax_fraction = [0.9]*num_patches
+sia_vax_fraction = [0.3]*num_patches
 
 # affect measurements
 wes_std_frac = [0.001]*num_patches  # determines how noisy wastewater surveillance is
@@ -52,7 +52,7 @@ maximal_initial_exposed=5
 
 # set outbreak initial conditions
 outbreak_prob=1/150 # for geometric distribution
-outbreak_beta=[4,6]
+outbreak_beta=[7,3] # bias arrivals towards a certain point in sims with beta distribution
 
 # vax hesitancy parameters
 response_to_diag = 0.005*np.eye(num_patches)
@@ -83,15 +83,15 @@ cost_per_vax = [0]*num_patches
 cost_per_diag_measurement = [0]*num_patches
 cost_per_wes_measurement = [0]*num_patches
 cost_per_infected = [1]*num_patches
-cost_per_exposed = [0]*num_patches
+cost_per_exposed = [1]*num_patches
 cost_of_npi = [0]*num_patches
 cost_of_opening_wes_site = [0]*num_patches
 
 # parameters to control the genetic algorithm
-num_simulations = 120
-max_tree_depth = 3
-number_of_members = 100
-top_choices = 20
+num_simulations = 300
+max_tree_depth = 2
+number_of_members = 60
+top_choices = 15
 max_rounds = 250
 
 # controls bias in tree formation towards lower threshold values
@@ -105,10 +105,10 @@ max_mutate_perc = 1
 threshold_mutation_probability = 0.99
 threshold_attenuation = 0.98
 
-action_mutation_probability = 0.4
+action_mutation_probability = 0.2
 action_attenuation = 0.98
 
-decision_mutation_probability = 0.5
+decision_mutation_probability = 0.2
 decision_attenuation = 0.98
 
 variable_change_probability = 0.15
@@ -117,5 +117,5 @@ var_change_attenuation = 0.98
 chop_decision_probability = 0.01
 chop_attenuation = 1.01
 
-patch_mutation_probability = 0.05
+patch_mutation_probability = 0.0
 patch_attenuation = 0.98
