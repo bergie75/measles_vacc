@@ -11,12 +11,8 @@ import shutil
 def generate_initial_candidates(number_of_members, depth=1):
     return [grow_random_tree(depth=depth) for _ in range(0, number_of_members)]
 
-def check_basic_reproduction_number(disease_params):
-    beta, mu, c, gamma, delta = disease_params
-    vax_rate = starting_vax_rate
-    threshold_1 = mu*beta/(mu+vax_rate)*(c*mu+gamma+c*delta)/((mu+gamma)*(mu+delta))
-    threshold_2 = c*beta*mu/((mu+vax_rate)*(2*mu+delta+gamma))
-    return [threshold_1, threshold_2]
+def check_basic_reproduction_number(alpha, beta, mu, c, gamma, delta):
+    return beta*(c*(mu+delta)+gamma)/((mu+delta)*(mu+gamma))*(mu/(mu+alpha))
 
 # yields the average score of a tree on num_simulations disease outbreaks, used to sort trees
 def tree_training_score(candidate_tree, schedule=default_schedule):

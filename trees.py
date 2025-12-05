@@ -61,6 +61,8 @@ class Node:
     def mutate_into_decision_node(self):
         rng = np.random.default_rng()
         decision_var = random.choice(simulation_outputs)
+
+        # checks if threshold generation should be skewed
         if use_beta_generation:
             threshold = rng.beta(dist_alpha, dist_beta)
         else:

@@ -59,8 +59,8 @@ def take_measurements(day, testing_schedule, decision_inputs, population_state, 
 
     for in_patch in range(0, num_patches):
         # increment counters for measurements. If measurements are taken, they will be reset to zero anyway
-        decision_inputs["time_since_diag"][in_patch] += 1
-        decision_inputs["time_since_wes"][in_patch] += 1
+        decision_inputs["time_since_diag"][in_patch] += 1/max_simulation_depth
+        decision_inputs["time_since_wes"][in_patch] += 1/max_simulation_depth
         
         # extract testing schedule for the current patch
         diag_period = testing_schedule["diag_period"][in_patch]
@@ -88,30 +88,46 @@ def take_measurements(day, testing_schedule, decision_inputs, population_state, 
                 decision_inputs["current_wes"][in_patch] = 0
 
     # enforce upper limits correctly after incrementing counter
-    decision_inputs["time_since_wes"][in_patch] = min(max_simulation_depth, decision_inputs["time_since_wes"][in_patch])
-    decision_inputs["time_since_diag"][in_patch] = min(max_simulation_depth, decision_inputs["time_since_diag"][in_patch])
+    decision_inputs["time_since_wes"][in_patch] = min(1, decision_inputs["time_since_wes"][in_patch])
+    decision_inputs["time_since_diag"][in_patch] = min(1, decision_inputs["time_since_diag"][in_patch])
     
     return costs_accrued   
 
 def affect_simulation(proposed_action, proposed_value, in_patch,
-                      current_vaccination_rate, npi_in_place):
+                      current_vaccination_rate, npi_in_place, sia_totals, population_state):
     
     # use selected action to modify simulation. Need to add check to ensure weird hacks don't emerge        
-    if proposed_action == "set_vax_rate":
-        current_vaccination_rate[in_patch] = proposed_value*max_vax_rate[in_patch]
+    if (proposed_action == "use_sia") and (sia_totals[in_patch] < sia_allowance[in_patch]):
+        newly_vaxxed = population_state[in_patch]*sia_vax_fraction[in_patch]
+        population_state[in_patch] -= newly_vaxxed
+        population_state[num_patches+in_patch] += newly_vaxxed
+        sia_totals[in_patch] += 1  # update total number of immunization actions used
     
-    elif proposed_action == "apply_npi":
-        npi_in_place[in_patch] = True
+    # elif proposed_action == "set_vax_rate":
+    #     current_vaccination_rate[in_patch] = proposed_value*max_vax_rate[in_patch]
     
-    elif proposed_action == "remove_npi":
-        npi_in_place[in_patch] = False
+    # elif proposed_action == "apply_npi":
+    #     npi_in_place[in_patch] = True
+    
+    # elif proposed_action == "remove_npi":
+    #     npi_in_place[in_patch] = False
+
+def generate_starting_day(method="geometric"):
+    if method == "geometric":
+        day_frac = rng.geometric(p=outbreak_prob)/max_simulation_depth
+    elif method == "beta":
+        day_frac = rng.beta(*outbreak_beta)
+    
+    return day_frac
 
 def score_tree(candidate_tree, testing_schedule=default_schedule):
     # initialize a simulation
     outbreak_has_begun = False
+    outbreak_has_ended = False
     wastewater_used = [False]*num_patches
     npi_in_place = [False]*num_patches
     current_vaccination_rate = starting_vax_rate
+    sia_totals = [0]*num_patches
     population_state = np.concatenate((np.ones(num_patches), np.zeros(3*num_patches)))
     decision_inputs = dict(zip(simulation_outputs, starting_values))
 
@@ -123,9 +139,12 @@ def score_tree(candidate_tree, testing_schedule=default_schedule):
 
     # keeps track of all actions, useful for data visualizations
     event_stream = []
+
+    # determine day the outbreak will start
+    starting_day_as_fraction = generate_starting_day(method=outbreak_method)
     
     for day in range(0, max_simulation_depth):
-        if not outbreak_has_begun and (rng.uniform() < outbreak_prob):
+        if not outbreak_has_begun and (starting_day_as_fraction <= day/max_simulation_depth):
             outbreak_has_begun = True
             initial_exposed_pop = np.random.choice(range(1, 1+maximal_initial_exposed))
             initial_patch = np.random.choice(range(0, num_patches))
@@ -140,17 +159,27 @@ def score_tree(candidate_tree, testing_schedule=default_schedule):
         
         # summary function used to decide how the simulation outputs and planner policy changes
         # relevant variables
-        affect_simulation(proposed_action, proposed_value, in_patch, current_vaccination_rate, npi_in_place)
+        affect_simulation(proposed_action, proposed_value, in_patch, current_vaccination_rate, npi_in_place, sia_totals, population_state)
         
         # take measurements, to be used on the next day
         tree_score += take_measurements(day, testing_schedule, decision_inputs, population_state, wastewater_used)
 
         # compute cost of vaccine and npi interventions
-        current_hes = vax_hes_level(decision_inputs)
+        # current_hes = vax_hes_level(decision_inputs)
+        current_hes = np.zeros(num_patches)
         
         # hard check to ensure no numerical leaking, even though none sick is a fixed point
-        if outbreak_has_begun:
+        if outbreak_has_begun and not outbreak_has_ended:
             population_state = simulate_day(population_state, disease_params, current_vaccination_rate, current_hes, npi_in_place)
+            # implement die-off of disease
+            for in_patch in range(0, num_patches):
+                perc_exposed = population_state[in_patch+2*num_patches]
+                perc_infected = population_state[in_patch+3*num_patches]
+                if (perc_exposed + perc_infected) < 1/max_pop[in_patch]:
+                    population_state[in_patch] += perc_exposed + perc_infected
+                    population_state[in_patch+2*num_patches] = 0
+                    population_state[in_patch+3*num_patches] = 0
+                    outbreak_has_ended = True
 
         # add costs of running totals
         for i in range(0, num_patches):
@@ -191,3 +220,16 @@ def tree_decision_plots(Tree, min_day=0, max_day=max_simulation_depth):
     plt.title("Change in vaccination rates over sample run")
     plt.legend(legend_labels)
     plt.show()
+
+def tree_sia_decisions(Tree):
+    sample_score, decision_path_samples, event_stream = score_tree(Tree)
+
+    sia_used = [0]*num_patches
+
+    print(f"Sample score: {sample_score}\n")
+
+    for i,event in enumerate(event_stream):
+        if event[0] == "use_sia" and sia_used[event[2]] < sia_allowance[event[2]]:
+            print(f"SIA implemented on day {i} in patch {event[2]}")
+            print(f"Decision logic: {decision_path_samples[i]}")
+            sia_used[event[2]] += 1
