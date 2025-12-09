@@ -1,5 +1,5 @@
 # all values controlled by user should come from here
-from parameters import *
+from parameters import exported_parameters
 # numerical methods
 import numpy as np
 import random
@@ -39,26 +39,38 @@ class Node:
     def terminal_leaf(self):
         return (self.action is not None)
     
-    def mutate_patch(self):
+    def mutate_patch(self, local_params=exported_parameters):
+        num_patches = local_params["num_patches"]
         self.in_patch = np.random.choice(range(0, num_patches))
     
     # defaults to taking a new value between 80% and 120% of old value
-    def mutate_threshold(self, max_perc_change=max_mutate_perc):
+    def mutate_threshold(self, local_params=exported_parameters):
         rng = np.random.default_rng()
+        max_perc_change = local_params["max_mutate_perc"]
         multiplier = rng.uniform(low=1-max_perc_change, high=1+max_perc_change)
         self.threshold = min(self.threshold*multiplier, 1)
     
-    def mutate_decision_var(self):
+    def mutate_decision_var(self, local_params=exported_parameters):
+        simulation_outputs = local_params["simulation_outputs"]
         self.decision_var = random.choice(simulation_outputs)
     
-    def mutate_action_value(self, max_perc_change=max_mutate_perc):
+    def mutate_action_value(self, local_params=exported_parameters):
         rng = np.random.default_rng()
+        max_perc_change = local_params["max_mutate_perc"]
         multiplier = rng.uniform(low=1-max_perc_change, high=1+max_perc_change)
         self.action_value = min(self.action_value*multiplier, 1)
     
     # transforms a node from a leaf to a decision node with two children
     # can be used to grow a tree
-    def mutate_into_decision_node(self):
+    def mutate_into_decision_node(self, local_params=exported_parameters):
+        num_patches = local_params["num_patches"]
+        simulation_outputs = local_params["simulation_outputs"]
+        use_beta_generation = local_params["use_beta_generation"]
+        dist_alpha = local_params["dist_alpha"]
+        dist_beta = local_params["dist_beta"]
+        action_set=local_params["action_set"]
+        actions_requiring_values = local_params["actions_requiring_values"]
+
         rng = np.random.default_rng()
         decision_var = random.choice(simulation_outputs)
 
@@ -84,8 +96,12 @@ class Node:
         self.left_child = left_child
         self.right_child = right_child
 
-    def mutate_into_leaf(self):
-        # choose a random action
+    def mutate_into_leaf(self, local_params=exported_parameters):
+        # unpack
+        action_set = local_params["action_set"]
+        actions_requiring_values = local_params["actions_requiring_values"]
+
+        # random action
         action = random.choice(action_set)
 
         self.action = action
@@ -110,7 +126,7 @@ class Node:
         # are violated so that the depth of a tree can be capped. Check leaves first so as not to undo
         # a chop
         if self.action_value is not None and (rng.uniform() < action_prob):
-            self.mutate_action_value(max_perc_change)
+            self.mutate_action_value()
         
         if self.action is not None and (depth_remaining > 0) and (rng.uniform() < decision_prob):
             self.mutate_into_decision_node()
@@ -119,7 +135,7 @@ class Node:
         if self.threshold is not None:
             if rng.uniform() > chop_prob:
                 if rng.uniform() < thresh_prob:
-                    self.mutate_threshold(max_perc_change)
+                    self.mutate_threshold()
                 if rng.uniform() < var_change_prob:
                     self.mutate_decision_var()
             else:
@@ -133,7 +149,10 @@ class Node:
             self.right_child.chain_mutation(patch_prob, thresh_prob, decision_prob, chop_prob, var_change_prob,
                         action_prob, max_perc_change, depth_remaining-1)
     
-    def trim_node(self):
+    def trim_node(self, local_params=exported_parameters):
+        #unpack
+        actions_requiring_values = local_params["actions_requiring_values"]
+
         # checks to see if both actions recommended in node are the same
         # if yes, the check is pointless and the node becomes a leaf
         if self.left_child is not None and self.right_child is not None:
@@ -320,7 +339,12 @@ def mate_trees(Tree1, Tree2):
     else:
         return Tree1, Tree2
 
-def grow_random_tree(depth, grow_probability=1):
+def grow_random_tree(depth, grow_probability=1, local_params=exported_parameters):
+    # unpack
+    num_patches = local_params["num_patches"]
+    action_set = local_params["action_set"]
+    actions_requiring_values = local_params["actions_requiring_values"]
+
     if depth > 1:
         # DO NOT COMBINE THESE TWO LINES. It doesn't work, I don't know why
         root_node = Node(in_patch=np.random.choice(range(0, num_patches)))

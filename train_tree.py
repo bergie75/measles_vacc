@@ -1,6 +1,6 @@
 from trees import Node, DecisionTree, grow_random_tree, mate_trees, load_tree
 from state_simulator import score_tree
-from parameters import *
+from parameters import exported_parameters
 
 import numpy as np
 import warnings
@@ -11,19 +11,43 @@ import shutil
 def generate_initial_candidates(number_of_members, depth=1):
     return [grow_random_tree(depth=depth) for _ in range(0, number_of_members)]
 
-def check_basic_reproduction_number(alpha, beta, mu, c, gamma, delta):
-    return beta*(c*(mu+delta)+gamma)/((mu+delta)*(mu+gamma))*(mu/(mu+alpha))
+def check_basic_reproduction_number(alpha, beta, mu, c, gamma, delta, population):
+    return population*beta*(c*(mu+delta)+gamma)/((mu+delta)*(mu+gamma))*(mu/(mu+alpha))
 
 # yields the average score of a tree on num_simulations disease outbreaks, used to sort trees
-def tree_training_score(candidate_tree, schedule=default_schedule):
+def tree_training_score(candidate_tree, schedule=None, local_params=exported_parameters):
+    # unpack
+    num_simulations = local_params["num_simulations"]
+    default_schedule = local_params["default_schedule"]
+
+    if schedule is None:
+        schedule = default_schedule
+
     scores = []
     for _ in range(0, num_simulations):
         one_sim_score, _, _ = score_tree(candidate_tree, schedule)
         scores.append(one_sim_score)
     return np.mean(scores), np.std(scores)
 
-def optimize(number_of_members, max_rounds, starting_depth=1, schedule=default_schedule,
-              run_name="temp_experiment", reload=None, round=0):
+def optimize(number_of_members, max_rounds, starting_depth=1, schedule=None,
+              run_name="temp_experiment", reload=None, round=0, local_params=exported_parameters):
+    
+    # unpack
+    top_choices = local_params["top_choices"]
+    max_tree_depth = local_params["max_tree_depth"]
+    patch_mutation_probability = local_params["patch_mutation_probability"]
+    patch_attenuation = local_params["patch_attenuation"]
+    threshold_mutation_probability = local_params["threshold_mutation_probability"]
+    threshold_attenuation = local_params["threshold_attenuation"]
+    decision_mutation_probability = local_params["decision_mutation_probability"]
+    decision_attenuation = local_params["decision_attenuation"]
+    chop_decision_probability = local_params["chop_decision_probability"]
+    chop_attenuation = local_params["chop_attenuation"]
+    variable_change_probability = local_params["variable_change_probability"]
+    var_change_attenuation = local_params["var_change_attenuation"]
+    action_mutation_probability = local_params["action_mutation_probability"]
+    action_attenuation = local_params["action_attenuation"]
+    default_schedule = local_params["default_schedule"]
     
     # create folder to save the run
     cwd = os.getcwd()
@@ -56,6 +80,10 @@ def optimize(number_of_members, max_rounds, starting_depth=1, schedule=default_s
     # open a logging file to store run information
     logfile = os.path.join(run_home_folder, "training_log.txt")
 
+    # use default schedule if needed
+    if schedule is None:
+        schedule = default_schedule
+    
     with open(logfile, 'w') as log:
         # main loop to upgrade our trees
         for i in range(0, max_rounds):
@@ -130,8 +158,4 @@ def optimize(number_of_members, max_rounds, starting_depth=1, schedule=default_s
             print("Offspring generated, round completed\n")
 
 if __name__ == "__main__":
-    #warnings.filterwarnings("ignore")
-    #thresholds = check_basic_reproduction_number(disease_params)
-    #print(f"Threshold 1: {thresholds[0]}, Threshold 2: {thresholds[1]}")
-    #reload = os.path.join("custom_starting_ensembles", "first_handcrafted")
-    optimize(number_of_members, max_rounds, 2, run_name="try_2", schedule=default_schedule)
+    pass
