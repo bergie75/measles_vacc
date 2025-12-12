@@ -11,6 +11,7 @@ def stochastic_day_update(population_state, local_params=exported_parameters):
     num_patches = local_params["num_patches"]
     disease_params = local_params["disease_params"]
     alpha = local_params["alpha"]
+    waning_rate = local_params["waning_rate"]
 
     beta, mu, c, gamma, delta = disease_params
 
@@ -33,9 +34,10 @@ def stochastic_day_update(population_state, local_params=exported_parameters):
         exp_to_inf_rates = gamma*E
         recovery_rates = delta*I
         vax_rates = alpha*S
+        lost_immunity_rates = waning_rate*V
 
         # find out the rate new events occur
-        all_rates = np.concatenate((exposure_rates, vax_rates, exp_to_inf_rates, recovery_rates, birth_rates, death_rates))
+        all_rates = np.concatenate((exposure_rates, vax_rates, exp_to_inf_rates, recovery_rates, birth_rates, death_rates, lost_immunity_rates))
         total_event_rate = np.sum(all_rates)
         prob_of_events = all_rates/total_event_rate
 
@@ -83,6 +85,10 @@ def stochastic_day_update(population_state, local_params=exported_parameters):
                 I[event_patch] -= 1
             elif compartment == 4:
                 R[event_patch] -= 1
+        elif event_type == 6:
+            # someone lost immunity to the disease
+            V[event_patch] -= 1
+            S[event_patch] += 1
 
 def take_measurements(day, testing_schedule, decision_inputs, population_state, wastewater_used, local_params=exported_parameters):
     # unpack from config
@@ -166,6 +172,7 @@ def score_tree(candidate_tree, testing_schedule, local_params=exported_parameter
     max_simulation_depth = local_params["max_simulation_depth"]
     max_pop = local_params["max_pop"]
     alpha = local_params["alpha"]
+    waning_rate = local_params["waning_rate"]
     simulation_outputs = local_params["simulation_outputs"]
     starting_values = local_params["starting_values"]
     outbreak_method = local_params["outbreak_method"]
@@ -182,14 +189,13 @@ def score_tree(candidate_tree, testing_schedule, local_params=exported_parameter
 
     # initialize a simulation
     outbreak_has_begun = False
-    outbreak_has_ended = False
     wastewater_used = [False]*num_patches
     npi_in_place = [False]*num_patches
     sia_totals = [0]*num_patches
     decision_inputs = dict(zip(simulation_outputs, starting_values))
 
     # construct initial population
-    population_state = [int(round(max_pop[i])*mu[i]/(mu[i]+alpha[i])) for i in range(0, num_patches)]  # set susceptible to equilibrium for vaccination
+    population_state = [int(round(max_pop[i]*(mu[i]+waning_rate[i])/(mu[i]+alpha[i]+waning_rate[i]))) for i in range(0, num_patches)]  # set susceptible to equilibrium for vaccination
     initially_vaxxed = [max_pop[i]-population_state[i] for i in range(0, num_patches)]
     population_state.extend(initially_vaxxed)
     population_state.extend([0]*3*num_patches)  # accounts E,I,R
@@ -228,15 +234,8 @@ def score_tree(candidate_tree, testing_schedule, local_params=exported_parameter
         # take measurements, to be used on the next day
         tree_score += take_measurements(day, testing_schedule, decision_inputs, population_state, wastewater_used)
         
-        # hard check to ensure no numerical leaking, even though none sick is a fixed point
-        if outbreak_has_begun and not outbreak_has_ended:
-            # use Gillespie method to simulate a day of the outbreak
-            stochastic_day_update(population_state)
-            
-            # if disease has died off, can stop simulating disease dynamics
-            sick_categories = population_state[2*num_patches:4*num_patches]
-            if np.sum(sick_categories) == 0:
-                outbreak_has_ended
+        # use Gillespie method to simulate a day of the outbreak
+        stochastic_day_update(population_state)
 
         # add costs of running totals
         for i in range(0, num_patches):
@@ -285,8 +284,9 @@ def tree_sia_decisions(Tree, local_params=exported_parameters):
     # unpack config
     num_patches = local_params["num_patches"]
     sia_allowance = local_params["sia_allowance"]
+    schedule = local_params["default_schedule"]
 
-    sample_score, decision_path_samples, event_stream = score_tree(Tree)
+    sample_score, decision_path_samples, event_stream = score_tree(Tree, schedule)
 
     sia_used = [0]*num_patches
 

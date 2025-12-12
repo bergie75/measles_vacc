@@ -36,8 +36,9 @@ mu = np.array([0.001/24]*num_patches)
 c = np.array([0]*num_patches)
 gamma = np.array([np.log(2)/72]*num_patches)  # 3 day average asymptomatic half life
 delta = np.array([np.log(2)/72]*num_patches)  # 3 day average recovery half life
-beta = np.array([[0.0028/24]])
+beta = np.array([[0.0014/24]])
 alpha = np.array([0.012/24]*num_patches)  # vaccination parameter
+waning_rate = np.array([0.003/24]*num_patches)
 disease_params = [beta,mu,c,gamma,delta]
 
 # describes the overall range of choices on vaccination
@@ -115,7 +116,8 @@ variable_list = ["max_simulation_depth", "num_patches", "max_pop",
                  "action_attenuation", "decision_mutation_probability",
                  "decision_attenuation", "variable_change_probability",
                  "var_change_attenuation", "patch_mutation_probability",
-                 "patch_attenuation", "chop_decision_probability", "chop_attenuation"]
+                 "patch_attenuation", "chop_decision_probability", "chop_attenuation",
+                 "waning_rate"]
 
 variable_vals = [max_simulation_depth, num_patches, max_pop,
                  action_set, actions_requiring_values, simulation_outputs,
@@ -134,7 +136,8 @@ variable_vals = [max_simulation_depth, num_patches, max_pop,
                  action_attenuation, decision_mutation_probability,
                  decision_attenuation, variable_change_probability,
                  var_change_attenuation, patch_mutation_probability,
-                 patch_attenuation, chop_decision_probability, chop_attenuation]
+                 patch_attenuation, chop_decision_probability, chop_attenuation,
+                 waning_rate]
 
 # all files will call this and unpack it locally, so changes can be made easily and consistently
 # elsewhere
