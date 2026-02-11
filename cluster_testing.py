@@ -2,10 +2,12 @@ import numpy as np
 from sklearn.cluster import AgglomerativeClustering, KMeans
 from scipy.integrate import odeint
 import matplotlib.pyplot as plt
+import seaborn as sns
 import matplotlib.cm as colormap
 from dtw import dtw
 import os
 import time
+from copy import deepcopy
 
 rng = np.random.default_rng()
 
@@ -79,7 +81,8 @@ def compartment_rhs_multi_patch(x, t, disease_params, num_patches):
     S=x[:num_patches]
     V=x[num_patches:2*num_patches]
     E=x[2*num_patches:3*num_patches]
-    I=x[3*num_patches:]
+    I=x[3*num_patches:4*num_patches]
+    cum_cases = x[4*num_patches:]
 
     alpha, beta, mu, c, gamma, delta = disease_params
 
@@ -87,115 +90,93 @@ def compartment_rhs_multi_patch(x, t, disease_params, num_patches):
     dV_dt = alpha*S-mu*V
     dE_dt = np.matmul(beta,(c*E+I))*S-(mu+gamma)*E
     dI_dt = gamma*E-(mu+delta)*I
+    dcum_cases_dt = gamma*E-(mu+delta)*I
 
-    return np.concatenate((dS_dt, dV_dt, dE_dt, dI_dt))
+    return np.concatenate((dS_dt, dV_dt, dE_dt, dI_dt, dcum_cases_dt))
 
-def dtw_test_run(disease_params, cluster_sizes, num_timepoints=1000, std_frac=10**(-2), minimum=0,
-                  tag="default", show_plots=True):
-    num_patches = np.sum(cluster_sizes)
-    initial_state = [1]*num_patches
+def cluster_accuracy(clusters, cluster_sizes):
+    # this should probably just be called a confusion matrix. Measures how close clusters are to underlying
+    # construction of transmission matrix
+    n_clusters = len(set(clusters))
+    true_clusters = np.array(make_true_cluster_vec(cluster_sizes))
 
-    alpha, beta, mu, c, gamma, delta = disease_params
-
-    # package for convenience
-    chosen_patch = 0
-    disease_params = [alpha, beta, mu, c, gamma, delta]
-    initial_state.extend([0]*3*num_patches)
-    initial_state = initial_state
-    initial_state[chosen_patch] -= 0.01
-    initial_state[2*num_patches+chosen_patch] += 0.01
+    commonality_matrix = np.zeros((n_clusters, n_clusters))
+    for i,pred_cluster in enumerate(clusters):
+        commonality_matrix[pred_cluster, true_clusters[i]] += 1
     
-    timepoints = np.linspace(0,50,num_timepoints)
-    disease_sim = odeint(compartment_rhs_multi_patch, initial_state, timepoints, args=(disease_params, num_patches))
+    # attempt to put dominant terms on diagonal
+    permutation = np.zeros((n_clusters, n_clusters))
+    for i in range(0, n_clusters):
+        j=np.argmax(commonality_matrix[i,:])
+        permutation[j,i]=1
     
-    # break out solutions for one patch
-    # susceptible = disease_sim[:,0]
-    # vaccinations = disease_sim[:,num_patches]
-    # exposed = disease_sim[:,2*num_patches]
-    # infections = disease_sim[:,3*num_patches]
-    # resistant = 1-susceptible-vaccinations-exposed-infections
+    # check for collisions and abort attempt to reorganize matrix if these occur
+    valid_permutation = False
+    for j in range(0, n_clusters):
+        col_check = (np.sum(permutation[:,j]) == 1)
+        valid_permutation = (valid_permutation or col_check)
     
-    # find data on exposures
-    exposures = disease_sim[:,2*num_patches:3*num_patches]
-    if show_plots:
-        for i in range(0, num_patches):
-            check_val = i
-            for k,elem in enumerate(cluster_sizes):
-                check_val -= elem
-                if check_val <=0:
-                    cluster = k
-                    break
-            plt.plot(timepoints, exposures[:,i], color=colormap.hot(cluster/(len(cluster_sizes)-1)))
-        plt.show()
-
-    # save results of wastewater
-    wes_data = np.zeros(exposures.shape)
-    for i in range(0, num_patches):
-        wes_data[:,i] = create_wes_data(exposures[:,i], std_frac=std_frac, minimum=minimum)
-
-    start_time = time.time()
-    dtw_distances=np.zeros((num_patches, num_patches))
-    for i in range(0, num_patches):
-        if i % 10 == 0:
-            print(f"Completed up to row {i}")
-        for j in range(i+1, num_patches):
-            # compute distance between wes measurements
-            elem_i=np.cumsum(wes_data[i,:])
-            elem_j=np.cumsum(wes_data[j,:])
-            dtw_distances[i,j] = dtw(elem_i, elem_j).distance
-
-    end_time = time.time()
-    print(f"Operation took {(end_time-start_time)/3600} hours")
+    if valid_permutation:
+        commonality_matrix = np.matmul(commonality_matrix, permutation)
     
-    # save computed distances
-    cwd = os.getcwd()
-    clustering_folder = os.path.join(cwd, "clustering_data")
-    cluster_distances_file = os.path.join(clustering_folder, f"cluster_distances_{tag}.npy")
-    raw_trajectories_file = os.path.join(clustering_folder, f"trajectories_{tag}.npy")
-    np.save(cluster_distances_file, dtw_distances)
-    np.save(raw_trajectories_file, wes_data)
-
-def measure_clustering(tag="default", n_clusters=2):
-    # create file names to load from
-    cwd = os.getcwd()
-    clustering_folder = os.path.join(cwd, "clustering_data")
-    cluster_distances_file = os.path.join(clustering_folder, f"cluster_distances_{tag}.npy")
-
-    # load results
-    computed_distances = np.load(cluster_distances_file)
-    raw_trajectories_file = os.path.join(clustering_folder, f"trajectories_{tag}.npy")
-    distance_matrix = computed_distances + np.transpose(computed_distances)
-    raw_trajectories = np.load(raw_trajectories_file)
-
-    # compute detection times
-    detection_times = find_detection_times(raw_trajectories, np.linspace(0,50,1000), 0.03*np.ones(raw_trajectories.shape))
-
-    agg = AgglomerativeClustering(n_clusters=n_clusters, metric="precomputed", linkage="average")
-    clusters = agg.fit_predict(distance_matrix)
-
-    for i in range(0, raw_trajectories.shape[1]):
-        plt.plot(raw_trajectories[:,i], color=colormap.hot(clusters[i]/(n_clusters-1)))
+    sns.heatmap(commonality_matrix, xticklabels=False, yticklabels=[f"Cluster {j+1}" for j in range(0, n_clusters)])
     plt.show()
 
-    return clusters
+def clustering_charts(all_detection_times, cluster_sizes, clusters, cluster_cutoff=1):
+        # plot detection times within and between clusters
+    lower_index = 0
+    n_clusters = len(cluster_sizes)
+    num_patches = np.sum(cluster_sizes)
+    
+    # don't alwats show every possibility
+    if cluster_cutoff is None:
+        display_clusters = cluster_sizes
+    else:
+        display_clusters = cluster_sizes[:cluster_cutoff]
+    for cluster_size in display_clusters:
+        final_cluster_detections = [[] for _ in range(0, n_clusters)]
+        upper_index = lower_index + cluster_size
+        detections_start_in_cluster = all_detection_times[lower_index:upper_index,:]
+        for j in range(0, num_patches):
+            final_cluster_detections[clusters[j]].extend(detections_start_in_cluster[:,j])
+        
+        final_averages = [np.mean(x) for x in final_cluster_detections]
+        final_std = [np.std(x) for x in final_cluster_detections]
+        
+        # update for next cluster
+        lower_index = upper_index
+        height = max(final_averages+final_std)*1.1
+        labels = [f"Cluster {j+1}" for j in range(0, n_clusters)]
+        plt.bar([j+1 for j in range(0, n_clusters)], final_averages, label="Average detection time")
+        plt.errorbar([j+1 for j in range(0, n_clusters)], final_averages, yerr=final_std, capsize=6, color="black", linestyle='', label="Standard dev. of detection time")
+        plt.xticks(1+np.arange(n_clusters), labels)
+        plt.ylabel("Detection time (days)")
+        plt.ylim([0, height])
+        plt.legend()
+        plt.show()
 
-def detection_clustering(disease_params, cluster_sizes, num_days=1000, unif_low=1, unif_high=1, minimum=0,
-                  sensitivity=0.1, scale_factor=8.72*1000*np.log(10)):
+def clustering_scenario(tag, disease_params, cluster_sizes, unif_low=0.6, unif_high=1, sensitivities=0.03, num_days=1500,
+                        minimum=0, scale_factor=8.72*1000*np.log(10)):
+    # unpack useful variables
+    multi_alpha, multi_beta, multi_mu, _, _, _ = disease_params
     num_patches = np.sum(cluster_sizes)
     num_timepoints=num_days+1
     timepoints = np.linspace(0,num_days,num_timepoints)
-    sensitivities = sensitivity*np.ones((num_timepoints, num_patches))
     all_detection_times = np.zeros((num_patches, num_patches))
     n_clusters = len(cluster_sizes)
-
-    # for initial vaccination
-    alpha, _, mu, _, _, _ = disease_params
-
+    
+    # expand test sensitivities. If scalar given, all sensitivities are the same. If vector, then sensitivity varies by catchment
+    if not hasattr(sensitivities, '__iter__'):
+        sensitivities = sensitivities*np.ones((num_timepoints, num_patches))
+    else:
+        sensitivities = np.vstack([sensitivities]*num_timepoints)
+    
+    # start all catchment areas at disease free equilibrium vaccination level
     for chosen_patch in range(0, num_patches):
         print(f"Computing patch {chosen_patch}")
-        initial_state = np.zeros(4*num_patches)
-        initial_state[:num_patches] = mu/(mu+alpha)
-        initial_state[num_patches:2*num_patches] = alpha/(mu+alpha)
+        initial_state = np.zeros(5*num_patches)
+        initial_state[:num_patches] = multi_mu/(multi_mu+multi_alpha)
+        initial_state[num_patches:2*num_patches] = multi_alpha/(multi_mu+multi_alpha)
         frac_exposed = 0.01*initial_state[chosen_patch]
         initial_state[chosen_patch] -= frac_exposed
         initial_state[2*num_patches+chosen_patch] += frac_exposed  # place patients in exposed state
@@ -212,100 +193,117 @@ def detection_clustering(disease_params, cluster_sizes, num_days=1000, unif_low=
         # compute when disease is actually found in wastewater
         all_detection_times[chosen_patch,:] = find_detection_times(wes_data, timepoints, sensitivities, scale_factor=scale_factor)
     
+    # from wastewater data alone, attempt to cluster the catchment areas
     agg = KMeans(n_clusters=n_clusters)
-    clusters = np.array(agg.fit_predict(all_detection_times))
-    true_clusters = np.array(make_true_cluster_vec(cluster_sizes))
+    learned_clusters = np.array(agg.fit_predict(all_detection_times))
 
-    commonality_matrix = np.zeros((n_clusters, n_clusters))
-    for i,pred_cluster in enumerate(clusters):
-        commonality_matrix[pred_cluster, true_clusters[i]] += 1
-    
-    permutation = np.zeros((n_clusters, n_clusters))
-    for i in range(0, n_clusters):
-        j=np.argmax(commonality_matrix[i,:])
-        permutation[j,i]=1
-    
-    valid_permutation = False
-    for j in range(0, n_clusters):
-        col_check = (np.sum(permutation[:,j]) == 1)
-        valid_permutation = (valid_permutation or col_check)
-    
-    if valid_permutation:
-        commonality_matrix = np.matmul(commonality_matrix, permutation)
-    
-    print(commonality_matrix)
+    cluster_accuracy(learned_clusters, cluster_sizes)
 
-    return clusters, all_detection_times
-
-def clustering_scenario(tag, disease_params, cluster_sizes, unif_low=0.6, unif_high=1, sensitivity=0.03, num_days=1500):
-    _, multi_beta, _, _, _, _ = disease_params
-    clusters, all_detection_times = detection_clustering(disease_params, cluster_sizes, unif_low=unif_low, unif_high=unif_high, sensitivity=sensitivity, num_days=num_days)
-
-    lower_index = 0
-    for cluster_size in cluster_sizes:
-        final_cluster_detections = [[] for _ in range(0, n_clusters)]
-        upper_index = lower_index + cluster_size
-        detections_start_in_cluster = all_detection_times[lower_index:upper_index,:]
-        for j in range(0, num_patches):
-            final_cluster_detections[clusters[j]].extend(detections_start_in_cluster[:,j])
-        
-        final_averages = [np.mean(x) for x in final_cluster_detections]
-        final_std = [np.std(x) for x in final_cluster_detections]
-        
-        # update for next cluster
-        lower_index = upper_index
-        plt.bar([1,2,3,4,5], final_averages, yerr=final_std)
-        plt.show()
+    # plot detection times within and between clusters
+    clustering_charts(all_detection_times, cluster_sizes, learned_clusters)
     
-    # save results
+    # create save directory
     cwd = os.getcwd()
     save_folder = os.path.join(cwd, "clustering_data", f"{tag}")
     if not os.path.exists(save_folder):
         os.makedirs(save_folder)
     
+    # save found clusters, detection times, and transmission matrix. The latter is saved because it is stochastic
+    # so we need to pass it to other functions to ensure consistency
     detection_time_file = os.path.join(save_folder, "detection_times.npy")
     clusters_file = os.path.join(save_folder, "clusters.npy")
     beta_file = os.path.join(save_folder, "beta.npy")
     np.save(detection_time_file, all_detection_times)
-    np.save(clusters_file, np.array(clusters))
+    np.save(clusters_file, np.array(learned_clusters))
     np.save(beta_file, multi_beta)
 
-def vaccination_strategy(tag, abridged_disease_params, unif_low=0.6, unif_high=1, sensitivity=0.03, num_days=1500):
-    # load data from clustering analysis
+def vaccination_strategy(tag, abridged_disease_params, sia_budget, unif_low=0.6, unif_high=1, sensitivities=0.03, 
+                         num_days=1500, scale_factor=8.72*1000*np.log(10), intervention_style="target_initial",
+                         chosen_patch=0):
+    
+    # find files to load data
     cwd = os.getcwd()
     save_folder = os.path.join(cwd, "clustering_data", f"{tag}")
     clusters_file = os.path.join(save_folder, "clusters.npy")
     beta_file = os.path.join(save_folder, "beta.npy")
 
+    # load pre-existing results
     clusters = np.load(clusters_file)
+    n_clusters = len(set(clusters))  # how many non-duplicated cluster labels are present
     num_patches = len(clusters)
     multi_beta = np.load(beta_file)
+
+    # expand test sensitivities if needed
+    if not hasattr(sensitivities, '__iter__'):
+        sensitivities = sensitivities*np.ones(num_patches)
+
+    # combine preloaded beta with other disease parameters
     multi_alpha, multi_mu, multi_c, multi_gamma, multi_delta = abridged_disease_params
     disease_params = [multi_alpha, multi_beta, multi_mu, multi_c, multi_gamma, multi_delta]
-
-    chosen_patch = 30  # we will make this user selectable later
     
     # prepapre the initial state for the simulation
-    pop_state = np.zeros(4*num_patches)
-    pop_state[:num_patches] = mu/(mu+alpha)
-    pop_state[num_patches:2*num_patches] = alpha/(mu+alpha)
+    pop_state = np.zeros(5*num_patches)
+    pop_state[:num_patches] = multi_mu/(mu+alpha)
+    pop_state[num_patches:2*num_patches] = multi_alpha/(multi_mu+multi_alpha)
     frac_exposed = 0.01*pop_state[chosen_patch]
     pop_state[chosen_patch] -= frac_exposed
     pop_state[2*num_patches+chosen_patch] += frac_exposed  # place patients in exposed state
+    track_cumulative_totals = np.zeros(num_patches)
+    
+    # track which clusters have currently registered a detection event
+    detections_in_cluster = [False]*n_clusters
+    sia_intervention_used = False
 
-    for day in range(0, num_days):
-    # simulate one day of disease evolution
+    for _ in range(0, num_days):
+        # simulate one day of disease evolution
         pop_state = odeint(compartment_rhs_multi_patch, pop_state, [0, 1], args=(disease_params, num_patches))[-1,:]
         exposures = pop_state[2*num_patches:3*num_patches]
         infected = pop_state[3*num_patches:4*num_patches]
 
+        # we get one sia per simulation, check if it has been used
+        if not sia_intervention_used:
+            # generate wes data and check for detections
+            shedding = exposures + infected
+            wes_data = [shedding[i]*scale_factor*rng.uniform(low=unif_low, high=unif_high) for i in range(0, num_patches)]
+            potential_detections = [wes >= sensitivities[j]*scale_factor for j,wes in enumerate(wes_data)]
+
+            # update cluster detection tracking
+            for j,detection_status in enumerate(potential_detections):
+                detections_in_cluster[clusters[j]] = detections_in_cluster[clusters[j]] or detection_status
+            
+            # select all detection events to use as a potential initial location for outbreak
+            # multiple can occur simultaneously
+            cluster_indices_with_detections = []
+            for j,detected_in_cluster in enumerate(detections_in_cluster):
+                if detected_in_cluster:
+                    cluster_indices_with_detections.append(j)
+            
+            # outbreak has been found, implement selected vaccination strategy
+            if len(cluster_indices_with_detections) > 0:
+                sia_intervention_used = True
+                # most of the time this is picking from a list of length one?
+                ground_zero_cluster = np.random.choice(cluster_indices_with_detections)
+                # in this option, we aggressively vaccinate in the patch we detected the disease in
+                if intervention_style == "target_initial":
+                    for j in range(0, num_patches):
+                        if clusters[j] == ground_zero_cluster:
+                            multi_alpha[j] += sia_budget
+                # in this option, we try to protect the other clusters
+                elif intervention_style == "protect_other_clusters":
+                    split_sia_budget = sia_budget/(n_clusters-1)  # divide budget for one cluster amongst the rest
+                    for j in range(0, num_patches):
+                        if clusters[j] != ground_zero_cluster:
+                            multi_alpha[j] += split_sia_budget
+    
+    track_cumulative_totals = pop_state[4*num_patches:]
+    return track_cumulative_totals, clusters
 
 if __name__ == "__main__":
-    tag = "test_script"
+    tag = "cumulative_case_mod"
 
     # patch connection strengths
     in_patch = 3*10**(-2)
-    out_patch = in_patch*10**(-3)
+    out_patch = in_patch*10**(-1)
 
     # cluster information
     cluster_sizes = [50,50,50,50,50]  # 250 catchment sites in 5 subgroups
@@ -338,5 +336,66 @@ if __name__ == "__main__":
 
     # package disease params, run simulations
     disease_params = [multi_alpha, multi_beta, multi_mu, multi_c, multi_gamma, multi_delta]
-    clustering_scenario(tag, disease_params, cluster_sizes, unif_low=0.6, unif_high=1, sensitivity=0.03, num_days=1500)
+    abridged_disease_params = [multi_alpha, multi_mu, multi_c, multi_gamma, multi_delta]
+    sensitivities = 0.03*np.array([rng.uniform(low=0.95, high=2) for _ in range(0, num_patches)])
+    num_days = 300
+    patch_pop = 1000
+    #clustering_scenario(tag, disease_params, cluster_sizes, unif_low=0.6, unif_high=1, sensitivities=sensitivities, num_days=num_days)
+
+    # generate plots from clustering
+    cwd = os.getcwd()
+    save_folder = os.path.join(cwd, "clustering_data", f"{tag}")
+    clusters_file = os.path.join(save_folder, "clusters.npy")
+    beta_file = os.path.join(save_folder, "beta.npy")
+    detect_file = os.path.join(save_folder, "detection_times.npy")
+
+    # load pre-existing results
+    clusters = np.load(clusters_file)
+    all_detection_times = np.load(detect_file)
+    n_clusters = len(set(clusters))  # how many non-duplicated cluster labels are present
+    num_patches = len(clusters)
+    multi_beta = np.load(beta_file)
+
+    #cluster_accuracy(clusters, [50,50,50,50,50])
+    clustering_charts(all_detection_times, cluster_sizes, clusters)
+
+    sia_budget = (n_clusters-1)*alpha
+    with_intervention, clusters = vaccination_strategy(tag, deepcopy(abridged_disease_params), 
+                                                       sia_budget, sensitivities=sensitivities, num_days=num_days)
+    without_intervention, _ = vaccination_strategy(tag, deepcopy(abridged_disease_params), 
+                                                   0, sensitivities=sensitivities, num_days=num_days)
+    spread_intervention, _ = vaccination_strategy(tag, deepcopy(abridged_disease_params), 
+                                                  sia_budget, intervention_style="protect_other_clusters", sensitivities=sensitivities, num_days=num_days)
+
+    with_intervention_clustered = np.zeros(n_clusters+1)
+    without_intervention_clustered = np.zeros(n_clusters+1)
+    spread_clustered = np.zeros(n_clusters+1)
+    for j in range(0, num_patches):
+        with_intervention_clustered[clusters[j]] += with_intervention[j]
+        without_intervention_clustered[clusters[j]] += without_intervention[j]
+        spread_clustered[clusters[j]] += spread_intervention[j]
+
+    with_intervention_clustered[-1] = np.mean(with_intervention_clustered[0:-1])
+    without_intervention_clustered[-1] = np.mean(without_intervention_clustered[0:-1])
+    spread_clustered[-1] = np.mean(spread_clustered[0:-1])
+
+    # administrative variables for graphing
+    originating_cluster = np.argmin(with_intervention_clustered[0:-1])
+    labels = [f"Cluster {j+1}" for j in range(0, n_clusters)]
+    labels.append("Average")
+    height = 1.25*max(without_intervention_clustered)
+    bounding_factor = 1.23
+    width=0.2
+
+    plt.bar(np.arange(n_clusters+1)-width, patch_pop*without_intervention_clustered, width=width, label="No intervention")
+    plt.bar(np.arange(n_clusters+1), patch_pop*with_intervention_clustered, width=width, label="Vaccinate origin cluster")
+    plt.bar(np.arange(n_clusters+1)+width, patch_pop*spread_clustered, width=width, label="Vaccinate other clusters")
+    plt.vlines(originating_cluster-2*width, 0, height*patch_pop/bounding_factor, color="black", linestyles="dashed")
+    plt.vlines(originating_cluster+2*width, 0, height*patch_pop/bounding_factor, color="black", linestyles="dashed")
+    plt.hlines(height*patch_pop/bounding_factor, originating_cluster-2*width, originating_cluster+2*width, color="black", linestyles="dashed", label="Origin cluster")
+    plt.xticks(np.arange(n_clusters+1), labels)
+    plt.ylim([0, height*patch_pop])
+    plt.ylabel("Cumulative case count")
+    plt.legend()
+    plt.show()
     
