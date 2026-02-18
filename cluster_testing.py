@@ -18,12 +18,20 @@ def make_true_cluster_vec(cluster_sizes):
     
     return true_cluster_vec
 
-def find_detection_times(wes_data, timepoints, sensitivities, scale_factor=1000*8.72*np.log(10)):
+def find_detection_times(wes_data, timepoints, sensitivities, scale_factor=8.72*np.log(10), N=None):
+    if N is None:
+        num_patches = len(sensitivities)
+        N=np.ones(num_patches)
+    
+    # perform stacking for compatibility with rpevious code
+    num_timepoints = len(timepoints)
+    sensitivities = np.vstack([sensitivities*N]*num_timepoints)
+    
     # a vector to hold the detection times
     detection_times = []
 
     # precursor to detection times
-    detections = (wes_data >= sensitivities*scale_factor)
+    detections = (wes_data >= (sensitivities*scale_factor))
 
     for j in range(0, wes_data.shape[1]):
         for i, time in enumerate(timepoints):
@@ -33,10 +41,10 @@ def find_detection_times(wes_data, timepoints, sensitivities, scale_factor=1000*
     
     return np.array(detection_times)
 
-def basic_reproduction_number(alpha, beta, mu, c, gamma, delta):
-    return beta*mu/(mu+alpha)*(c*(mu+delta)+gamma)/((mu+gamma)*(mu+delta))
+def basic_reproduction_number(alpha, beta, mu, c, gamma, delta, N=1):
+    return N*beta*mu/(mu+alpha)*(c*(mu+delta)+gamma)/((mu+gamma)*(mu+delta))
 
-def create_wes_data(exposure_timeseries, scale_factor=1000*8.72*np.log(10), unif_low=1, unif_high=1, minimum=0):
+def create_wes_data(exposure_timeseries, scale_factor=8.72*np.log(10), unif_low=1, unif_high=1, minimum=0):
     perfect_data = exposure_timeseries*scale_factor
 
     measurement_outputs = []
@@ -48,6 +56,16 @@ def create_wes_data(exposure_timeseries, scale_factor=1000*8.72*np.log(10), unif
             measurement_outputs.append(0)
     
     return np.array(measurement_outputs)
+
+def random_site_closure(clusters, closure_perc):
+    # extract total patch numbers and cluster information
+    num_patches = len(clusters)
+
+    # vector which determines whether site results should be considered
+    # on average, this closes closure_perc of the sites in each cluster
+    operational_surveillance = [rng.uniform() >= closure_perc for _ in range(0, num_patches)]
+    
+    return operational_surveillance
 
 def transmission_matrix(raw_beta, cluster_sizes, in_cluster_strength=0.5, out_cluster_strength=0.01, connect_to_frac=1):
     # recreate number of patches
@@ -76,17 +94,21 @@ def transmission_matrix(raw_beta, cluster_sizes, in_cluster_strength=0.5, out_cl
     waifw_matrix = raw_beta*(np.eye(num_patches) + upper_triangle + np.transpose(upper_triangle))
     return waifw_matrix
 
-def compartment_rhs_multi_patch(x, t, disease_params, num_patches):
+def compartment_rhs_multi_patch(x, t, disease_params, num_patches, N):
+    # if population sizes are not specified, assume fractions
+    if N is None:
+        N=np.ones(num_patches)
+    
     # break state up into epidemiologically relevant categories
     S=x[:num_patches]
     V=x[num_patches:2*num_patches]
     E=x[2*num_patches:3*num_patches]
     I=x[3*num_patches:4*num_patches]
-    cum_cases = x[4*num_patches:]
+    #cum_cases = x[4*num_patches:]
 
     alpha, beta, mu, c, gamma, delta = disease_params
 
-    dS_dt = mu*(1-S)-alpha*S-np.matmul(beta,(c*E+I))*S
+    dS_dt = mu*(N-S)-alpha*S-np.matmul(beta,(c*E+I))*S
     dV_dt = alpha*S-mu*V
     dE_dt = np.matmul(beta,(c*E+I))*S-(mu+gamma)*E
     dI_dt = gamma*E-(mu+delta)*I
@@ -155,8 +177,8 @@ def clustering_charts(all_detection_times, cluster_sizes, clusters, cluster_cuto
         plt.legend()
         plt.show()
 
-def clustering_scenario(tag, disease_params, cluster_sizes, unif_low=0.6, unif_high=1, sensitivities=0.03, num_days=1500,
-                        minimum=0, scale_factor=8.72*1000*np.log(10)):
+def clustering_scenario(tag, disease_params, patch_populations, cluster_sizes, unif_low=0.6, unif_high=1, sensitivities=0.03, num_days=1500,
+                        minimum=0, scale_factor=8.72*np.log(10)):
     # unpack useful variables
     multi_alpha, multi_beta, multi_mu, _, _, _ = disease_params
     num_patches = np.sum(cluster_sizes)
@@ -167,31 +189,31 @@ def clustering_scenario(tag, disease_params, cluster_sizes, unif_low=0.6, unif_h
     
     # expand test sensitivities. If scalar given, all sensitivities are the same. If vector, then sensitivity varies by catchment
     if not hasattr(sensitivities, '__iter__'):
-        sensitivities = sensitivities*np.ones((num_timepoints, num_patches))
-    else:
-        sensitivities = np.vstack([sensitivities]*num_timepoints)
+        sensitivities = sensitivities*np.ones(num_patches)
     
     # start all catchment areas at disease free equilibrium vaccination level
     for chosen_patch in range(0, num_patches):
         print(f"Computing patch {chosen_patch}")
         initial_state = np.zeros(5*num_patches)
-        initial_state[:num_patches] = multi_mu/(multi_mu+multi_alpha)
-        initial_state[num_patches:2*num_patches] = multi_alpha/(multi_mu+multi_alpha)
+        initial_state[:num_patches] = (multi_mu/(multi_mu+multi_alpha))*patch_populations
+        initial_state[num_patches:2*num_patches] = (multi_alpha/(multi_mu+multi_alpha))*patch_populations
         frac_exposed = 0.01*initial_state[chosen_patch]
         initial_state[chosen_patch] -= frac_exposed
         initial_state[2*num_patches+chosen_patch] += frac_exposed  # place patients in exposed state
 
-        disease_sim = odeint(compartment_rhs_multi_patch, initial_state, timepoints, args=(disease_params, num_patches))
+        disease_sim = odeint(compartment_rhs_multi_patch, initial_state, timepoints, args=(disease_params, num_patches, patch_populations))
         exposures = disease_sim[:,2*num_patches:3*num_patches]
         infected = disease_sim[:,3*num_patches:4*num_patches]
 
         # save results of wastewater
         wes_data = np.zeros(exposures.shape)
         for i in range(0, num_patches):
-            wes_data[:,i] = create_wes_data(exposures[:,i]+infected[:,i], unif_low=unif_low, unif_high=unif_high, minimum=minimum, scale_factor=scale_factor)
+            wes_data[:,i] = create_wes_data(exposures[:,i]+infected[:,i], unif_low=unif_low, unif_high=unif_high, minimum=minimum,
+                                             scale_factor=scale_factor)
         
         # compute when disease is actually found in wastewater
-        all_detection_times[chosen_patch,:] = find_detection_times(wes_data, timepoints, sensitivities, scale_factor=scale_factor)
+        all_detection_times[chosen_patch,:] = find_detection_times(wes_data, timepoints, sensitivities, 
+                                                                   scale_factor=scale_factor, N=patch_populations)
     
     # from wastewater data alone, attempt to cluster the catchment areas
     agg = KMeans(n_clusters=n_clusters)
@@ -217,9 +239,9 @@ def clustering_scenario(tag, disease_params, cluster_sizes, unif_low=0.6, unif_h
     np.save(clusters_file, np.array(learned_clusters))
     np.save(beta_file, multi_beta)
 
-def vaccination_strategy(tag, abridged_disease_params, sia_budget, unif_low=0.6, unif_high=1, sensitivities=0.03, 
-                         num_days=1500, scale_factor=8.72*1000*np.log(10), intervention_style="target_initial",
-                         chosen_patch=0):
+def vaccination_strategy(tag, abridged_disease_params, patch_populations, sia_budget, unif_low=0.6, unif_high=1, sensitivities=0.03, 
+                         num_days=1500, scale_factor=8.72*np.log(10),
+                         chosen_patch=0, initial_cluster_allocation=1, operational_surveillance=None):
     
     # find files to load data
     cwd = os.getcwd()
@@ -236,6 +258,10 @@ def vaccination_strategy(tag, abridged_disease_params, sia_budget, unif_low=0.6,
     # expand test sensitivities if needed
     if not hasattr(sensitivities, '__iter__'):
         sensitivities = sensitivities*np.ones(num_patches)
+    
+    # if no site closures specified, assume all WES sites are operational
+    if operational_surveillance is None:
+        operational_surveillance = [True]*num_patches
 
     # combine preloaded beta with other disease parameters
     multi_alpha, multi_mu, multi_c, multi_gamma, multi_delta = abridged_disease_params
@@ -243,8 +269,8 @@ def vaccination_strategy(tag, abridged_disease_params, sia_budget, unif_low=0.6,
     
     # prepapre the initial state for the simulation
     pop_state = np.zeros(5*num_patches)
-    pop_state[:num_patches] = multi_mu/(mu+alpha)
-    pop_state[num_patches:2*num_patches] = multi_alpha/(multi_mu+multi_alpha)
+    pop_state[:num_patches] = (multi_mu/(multi_mu+multi_alpha))*patch_populations
+    pop_state[num_patches:2*num_patches] = (multi_alpha/(multi_mu+multi_alpha))*patch_populations
     frac_exposed = 0.01*pop_state[chosen_patch]
     pop_state[chosen_patch] -= frac_exposed
     pop_state[2*num_patches+chosen_patch] += frac_exposed  # place patients in exposed state
@@ -256,7 +282,7 @@ def vaccination_strategy(tag, abridged_disease_params, sia_budget, unif_low=0.6,
 
     for _ in range(0, num_days):
         # simulate one day of disease evolution
-        pop_state = odeint(compartment_rhs_multi_patch, pop_state, [0, 1], args=(disease_params, num_patches))[-1,:]
+        pop_state = odeint(compartment_rhs_multi_patch, pop_state, [0, 1], args=(disease_params, num_patches, patch_populations))[-1,:]
         exposures = pop_state[2*num_patches:3*num_patches]
         infected = pop_state[3*num_patches:4*num_patches]
 
@@ -265,7 +291,8 @@ def vaccination_strategy(tag, abridged_disease_params, sia_budget, unif_low=0.6,
             # generate wes data and check for detections
             shedding = exposures + infected
             wes_data = [shedding[i]*scale_factor*rng.uniform(low=unif_low, high=unif_high) for i in range(0, num_patches)]
-            potential_detections = [wes >= sensitivities[j]*scale_factor for j,wes in enumerate(wes_data)]
+            # detections modified to ensure site has been selected to continue functioning
+            potential_detections = [(wes >= patch_populations[j]*sensitivities[j]*scale_factor) and operational_surveillance[j] for j,wes in enumerate(wes_data)]
 
             # update cluster detection tracking
             for j,detection_status in enumerate(potential_detections):
@@ -283,27 +310,30 @@ def vaccination_strategy(tag, abridged_disease_params, sia_budget, unif_low=0.6,
                 sia_intervention_used = True
                 # most of the time this is picking from a list of length one?
                 ground_zero_cluster = np.random.choice(cluster_indices_with_detections)
-                # in this option, we aggressively vaccinate in the patch we detected the disease in
-                if intervention_style == "target_initial":
-                    for j in range(0, num_patches):
-                        if clusters[j] == ground_zero_cluster:
-                            multi_alpha[j] += sia_budget
-                # in this option, we try to protect the other clusters
-                elif intervention_style == "protect_other_clusters":
-                    split_sia_budget = sia_budget/(n_clusters-1)  # divide budget for one cluster amongst the rest
-                    for j in range(0, num_patches):
-                        if clusters[j] != ground_zero_cluster:
-                            multi_alpha[j] += split_sia_budget
+
+                # divide sia budget between patches, using allocation to decide how much goes to ground zero
+                # vs other patches
+                initial_cluster_budget = initial_cluster_allocation*sia_budget
+                other_clusters_budget = (1-initial_cluster_allocation)*sia_budget/(n_clusters-1)
+                
+                # loop over all patches and provide allocated vaccination resources
+                for j in range(0, num_patches):
+                    if clusters[j] == ground_zero_cluster:
+                        multi_alpha[j] += initial_cluster_budget
+                    else:
+                        multi_alpha[j] += other_clusters_budget
     
     track_cumulative_totals = pop_state[4*num_patches:]
     return track_cumulative_totals, clusters
 
 if __name__ == "__main__":
-    tag = "cumulative_case_mod"
+    tag = "alternative_parameters"
+    run_through = True
+    cluster_first = False
 
     # patch connection strengths
-    in_patch = 3*10**(-2)
-    out_patch = in_patch*10**(-1)
+    in_patch = 10**(-1)
+    out_patch = in_patch*10**(-2)
 
     # cluster information
     cluster_sizes = [50,50,50,50,50]  # 250 catchment sites in 5 subgroups
@@ -311,91 +341,103 @@ if __name__ == "__main__":
     n_clusters = len(cluster_sizes)
 
     # other disease parameters, given on day timescale
-    gamma = np.log(2)/7
-    delta = np.log(2)/7
+    gamma = np.log(1/0.9)/7
+    delta = np.log(1/0.9)/10
+    #delta = 0.01
     mu = 0.01
-    c = 0
-    alpha = 0.02
-    beta = 0.6
+    c = 0.2
+    alpha = 0.05
+    beta = 0.3/1000
 
-    one_patch_number = basic_reproduction_number(alpha, beta, mu, c, gamma, delta)
+    # for monitoring
+    detection_threshold = 0.07
+
+    one_patch_number = basic_reproduction_number(alpha, beta, mu, c, gamma, delta, N=1000)
     print(f"R_0 in isolated patch: {one_patch_number}")
-    many_patch_estimate = (1+(cluster_sizes[0]-1)/2*in_patch + cluster_sizes[1]/2*out_patch)*one_patch_number
-    print(f"Overall R_0: {many_patch_estimate}")
 
-    # other disease parameters, given on day timescale
-    multi_gamma = np.array([gamma]*num_patches)
-    multi_delta = np.array([delta]*num_patches)
-    multi_mu = np.array([mu]*num_patches)
-    multi_c = np.array([c]*num_patches)
-    multi_alpha = np.array([alpha]*num_patches)
-    
-    # construct a transmission matrix
-    multi_beta = transmission_matrix(beta, cluster_sizes=cluster_sizes, in_cluster_strength=in_patch, out_cluster_strength=out_patch,
-                               connect_to_frac=0.5)
+    if run_through:
+        # other disease parameters, given on day timescale
+        multi_gamma = np.array([gamma]*num_patches)
+        multi_delta = np.array([delta]*num_patches)
+        multi_mu = np.array([mu]*num_patches)
+        multi_c = np.array([c]*num_patches)
+        multi_alpha = np.array([alpha]*num_patches)
+        
+        # construct a transmission matrix
+        multi_beta = transmission_matrix(beta, cluster_sizes=cluster_sizes, in_cluster_strength=in_patch, out_cluster_strength=out_patch,
+                                connect_to_frac=0.5)
 
-    # package disease params, run simulations
-    disease_params = [multi_alpha, multi_beta, multi_mu, multi_c, multi_gamma, multi_delta]
-    abridged_disease_params = [multi_alpha, multi_mu, multi_c, multi_gamma, multi_delta]
-    sensitivities = 0.03*np.array([rng.uniform(low=0.95, high=2) for _ in range(0, num_patches)])
-    num_days = 300
-    patch_pop = 1000
-    #clustering_scenario(tag, disease_params, cluster_sizes, unif_low=0.6, unif_high=1, sensitivities=sensitivities, num_days=num_days)
+        # package disease params, run simulations
+        disease_params = [multi_alpha, multi_beta, multi_mu, multi_c, multi_gamma, multi_delta]
+        abridged_disease_params = [multi_alpha, multi_mu, multi_c, multi_gamma, multi_delta]
+        #sensitivities = 0.03*np.array([rng.uniform(low=0.95, high=2) for _ in range(0, num_patches)])
+        sensitivities = detection_threshold*np.ones(num_patches)
+        num_days = 600
+        patch_pop = 1000*np.ones(num_patches)
+        if cluster_first:
+            clustering_scenario(tag, disease_params, patch_pop, cluster_sizes, unif_low=0.6, unif_high=1, sensitivities=sensitivities, num_days=num_days)
 
-    # generate plots from clustering
-    cwd = os.getcwd()
-    save_folder = os.path.join(cwd, "clustering_data", f"{tag}")
-    clusters_file = os.path.join(save_folder, "clusters.npy")
-    beta_file = os.path.join(save_folder, "beta.npy")
-    detect_file = os.path.join(save_folder, "detection_times.npy")
+        # generate plots from clustering
+        cwd = os.getcwd()
+        save_folder = os.path.join(cwd, "clustering_data", f"{tag}")
+        clusters_file = os.path.join(save_folder, "clusters.npy")
+        beta_file = os.path.join(save_folder, "beta.npy")
+        detect_file = os.path.join(save_folder, "detection_times.npy")
 
-    # load pre-existing results
-    clusters = np.load(clusters_file)
-    all_detection_times = np.load(detect_file)
-    n_clusters = len(set(clusters))  # how many non-duplicated cluster labels are present
-    num_patches = len(clusters)
-    multi_beta = np.load(beta_file)
+        # load pre-existing results, redefines some variables from above
+        clusters = np.load(clusters_file)
+        all_detection_times = np.load(detect_file)
+        n_clusters = len(set(clusters))  # how many non-duplicated cluster labels are present
+        num_patches = len(clusters)
+        multi_beta = np.load(beta_file)
 
-    #cluster_accuracy(clusters, [50,50,50,50,50])
-    clustering_charts(all_detection_times, cluster_sizes, clusters)
+        #cluster_accuracy(clusters, [50,50,50,50,50])
+        #clustering_charts(all_detection_times, cluster_sizes, clusters)
 
-    sia_budget = (n_clusters-1)*alpha
-    with_intervention, clusters = vaccination_strategy(tag, deepcopy(abridged_disease_params), 
-                                                       sia_budget, sensitivities=sensitivities, num_days=num_days)
-    without_intervention, _ = vaccination_strategy(tag, deepcopy(abridged_disease_params), 
-                                                   0, sensitivities=sensitivities, num_days=num_days)
-    spread_intervention, _ = vaccination_strategy(tag, deepcopy(abridged_disease_params), 
-                                                  sia_budget, intervention_style="protect_other_clusters", sensitivities=sensitivities, num_days=num_days)
+        # how many sites are closed
+        operational_surveillance = random_site_closure(clusters, 0.99)
 
-    with_intervention_clustered = np.zeros(n_clusters+1)
-    without_intervention_clustered = np.zeros(n_clusters+1)
-    spread_clustered = np.zeros(n_clusters+1)
-    for j in range(0, num_patches):
-        with_intervention_clustered[clusters[j]] += with_intervention[j]
-        without_intervention_clustered[clusters[j]] += without_intervention[j]
-        spread_clustered[clusters[j]] += spread_intervention[j]
+        sia_budget = (n_clusters-1)*alpha
+        with_intervention, clusters = vaccination_strategy(tag, deepcopy(abridged_disease_params), patch_pop, 
+                                                        sia_budget, sensitivities=sensitivities, num_days=num_days,
+                                                            initial_cluster_allocation=1, operational_surveillance=operational_surveillance)
+        
+        without_intervention, _ = vaccination_strategy(tag, deepcopy(abridged_disease_params), patch_pop, 
+                                                    0, sensitivities=sensitivities, num_days=num_days, operational_surveillance=operational_surveillance)
+        
+        spread_intervention, _ = vaccination_strategy(tag, deepcopy(abridged_disease_params), patch_pop,
+                                                    sia_budget, initial_cluster_allocation=0, sensitivities=sensitivities, 
+                                                    num_days=num_days, operational_surveillance=operational_surveillance)
 
-    with_intervention_clustered[-1] = np.mean(with_intervention_clustered[0:-1])
-    without_intervention_clustered[-1] = np.mean(without_intervention_clustered[0:-1])
-    spread_clustered[-1] = np.mean(spread_clustered[0:-1])
+        with_intervention_clustered = np.zeros(n_clusters+1)
+        without_intervention_clustered = np.zeros(n_clusters+1)
+        spread_clustered = np.zeros(n_clusters+1)
+        for j in range(0, num_patches):
+            with_intervention_clustered[clusters[j]] += with_intervention[j]
+            without_intervention_clustered[clusters[j]] += without_intervention[j]
+            spread_clustered[clusters[j]] += spread_intervention[j]
 
-    # administrative variables for graphing
-    originating_cluster = np.argmin(with_intervention_clustered[0:-1])
-    labels = [f"Cluster {j+1}" for j in range(0, n_clusters)]
-    labels.append("Average")
-    height = 1.25*max(without_intervention_clustered)
-    bounding_factor = 1.23
-    width=0.2
+        with_intervention_clustered[-1] = np.mean(with_intervention_clustered[0:-1])
+        without_intervention_clustered[-1] = np.mean(without_intervention_clustered[0:-1])
+        spread_clustered[-1] = np.mean(spread_clustered[0:-1])
 
-    plt.bar(np.arange(n_clusters+1)-width, patch_pop*without_intervention_clustered, width=width, label="No intervention")
-    plt.bar(np.arange(n_clusters+1), patch_pop*with_intervention_clustered, width=width, label="Vaccinate origin cluster")
-    plt.bar(np.arange(n_clusters+1)+width, patch_pop*spread_clustered, width=width, label="Vaccinate other clusters")
-    plt.vlines(originating_cluster-2*width, 0, height*patch_pop/bounding_factor, color="black", linestyles="dashed")
-    plt.vlines(originating_cluster+2*width, 0, height*patch_pop/bounding_factor, color="black", linestyles="dashed")
-    plt.hlines(height*patch_pop/bounding_factor, originating_cluster-2*width, originating_cluster+2*width, color="black", linestyles="dashed", label="Origin cluster")
-    plt.xticks(np.arange(n_clusters+1), labels)
-    plt.ylim([0, height*patch_pop])
-    plt.ylabel("Cumulative case count")
-    plt.legend()
-    plt.show()
+        # administrative variables for graphing
+        originating_cluster = clusters[0]
+        labels = [f"Cluster {j+1}" for j in range(0, n_clusters)]
+        labels.append("Average")
+        height = 1.25*max(without_intervention_clustered)
+        bounding_factor = 1.23
+        width=0.2
+
+        plt.bar(np.arange(n_clusters+1)-width, without_intervention_clustered, width=width, label="No intervention")
+        plt.bar(np.arange(n_clusters+1), with_intervention_clustered, width=width, label="Vaccinate origin cluster")
+        plt.bar(np.arange(n_clusters+1)+width, spread_clustered, width=width, label="Vaccinate other clusters")
+        plt.vlines(originating_cluster-2*width, 0, height/bounding_factor, color="black", linestyles="dashed")
+        plt.vlines(originating_cluster+2*width, 0, height/bounding_factor, color="black", linestyles="dashed")
+        plt.hlines(height/bounding_factor, originating_cluster-2*width, originating_cluster+2*width, color="black", linestyles="dashed", label="Origin cluster")
+        plt.xticks(np.arange(n_clusters+1), labels)
+        plt.ylim([0, height])
+        plt.ylabel("Cumulative case count")
+        plt.legend()
+        plt.show()
     
