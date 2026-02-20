@@ -18,31 +18,35 @@ def make_true_cluster_vec(cluster_sizes):
     
     return true_cluster_vec
 
-def find_detection_times(wes_data, timepoints, sensitivities, scale_factor=8.72*np.log(10), N=None):
+def find_detection_times(wes_data, timepoints, sensitivities, scale_factor=8.72*np.log(10), N=None, detection_day_lag=0):
     if N is None:
         num_patches = len(sensitivities)
         N=np.ones(num_patches)
     
-    # perform stacking for compatibility with rpevious code
+    # perform stacking for compatibility with rpevious code, multiply population into sensitivities 
     num_timepoints = len(timepoints)
-    sensitivities = np.vstack([sensitivities*N]*num_timepoints)
+    scaled_sensitivities = np.vstack([sensitivities*N]*num_timepoints)
     
     # a vector to hold the detection times
     detection_times = []
 
     # precursor to detection times
-    detections = (wes_data >= (sensitivities*scale_factor))
+    detections = (wes_data >= (scaled_sensitivities*scale_factor))
 
     for j in range(0, wes_data.shape[1]):
         for i, time in enumerate(timepoints):
-            if detections[i,j]:
-                detection_times.append(time)
+            if detections[i,j] or i==len(timepoints)-1:
+                detection_times.append(time+detection_day_lag)
                 break
     
     return np.array(detection_times)
 
 def basic_reproduction_number(alpha, beta, mu, c, gamma, delta, N=1):
     return N*beta*mu/(mu+alpha)*(c*(mu+delta)+gamma)/((mu+gamma)*(mu+delta))
+
+def compute_total_daily_doses(num_wes_closed, base_daily_doses, cost_per_dose=95.201, daily_wes_cost=6691.3):
+    doses_per_closed_wes = daily_wes_cost/cost_per_dose
+    return base_daily_doses + num_wes_closed*doses_per_closed_wes
 
 def create_wes_data(exposure_timeseries, scale_factor=8.72*np.log(10), unif_low=1, unif_high=1, minimum=0):
     perfect_data = exposure_timeseries*scale_factor
@@ -112,7 +116,7 @@ def compartment_rhs_multi_patch(x, t, disease_params, num_patches, N):
     dV_dt = alpha*S-mu*V
     dE_dt = np.matmul(beta,(c*E+I))*S-(mu+gamma)*E
     dI_dt = gamma*E-(mu+delta)*I
-    dcum_cases_dt = gamma*E-(mu+delta)*I
+    dcum_cases_dt = I
 
     return np.concatenate((dS_dt, dV_dt, dE_dt, dI_dt, dcum_cases_dt))
 
@@ -168,7 +172,7 @@ def clustering_charts(all_detection_times, cluster_sizes, clusters, cluster_cuto
         # update for next cluster
         lower_index = upper_index
         height = max(final_averages+final_std)*1.1
-        labels = [f"Cluster {j+1}" for j in range(0, n_clusters)]
+        labels = [f"{j+1}" for j in range(0, n_clusters)]
         plt.bar([j+1 for j in range(0, n_clusters)], final_averages, label="Average detection time")
         plt.errorbar([j+1 for j in range(0, n_clusters)], final_averages, yerr=final_std, capsize=6, color="black", linestyle='', label="Standard dev. of detection time")
         plt.xticks(1+np.arange(n_clusters), labels)
@@ -178,7 +182,7 @@ def clustering_charts(all_detection_times, cluster_sizes, clusters, cluster_cuto
         plt.show()
 
 def clustering_scenario(tag, disease_params, patch_populations, cluster_sizes, unif_low=0.6, unif_high=1, sensitivities=0.03, num_days=1500,
-                        minimum=0, scale_factor=8.72*np.log(10)):
+                        minimum=0, scale_factor=8.72*np.log(10), detection_day_lag=0):
     # unpack useful variables
     multi_alpha, multi_beta, multi_mu, _, _, _ = disease_params
     num_patches = np.sum(cluster_sizes)
@@ -213,13 +217,13 @@ def clustering_scenario(tag, disease_params, patch_populations, cluster_sizes, u
         
         # compute when disease is actually found in wastewater
         all_detection_times[chosen_patch,:] = find_detection_times(wes_data, timepoints, sensitivities, 
-                                                                   scale_factor=scale_factor, N=patch_populations)
+                                                                   scale_factor=scale_factor, N=patch_populations, detection_day_lag=detection_day_lag)
     
     # from wastewater data alone, attempt to cluster the catchment areas
     agg = KMeans(n_clusters=n_clusters)
     learned_clusters = np.array(agg.fit_predict(all_detection_times))
 
-    cluster_accuracy(learned_clusters, cluster_sizes)
+    #cluster_accuracy(learned_clusters, cluster_sizes)
 
     # plot detection times within and between clusters
     clustering_charts(all_detection_times, cluster_sizes, learned_clusters)
@@ -241,7 +245,7 @@ def clustering_scenario(tag, disease_params, patch_populations, cluster_sizes, u
 
 def vaccination_strategy(tag, abridged_disease_params, patch_populations, sia_budget, unif_low=0.6, unif_high=1, sensitivities=0.03, 
                          num_days=1500, scale_factor=8.72*np.log(10),
-                         chosen_patch=0, initial_cluster_allocation=1, operational_surveillance=None):
+                         chosen_patch=0, initial_cluster_allocation=1, operational_surveillance=None, detection_day_lag=0):
     
     # find files to load data
     cwd = os.getcwd()
@@ -278,7 +282,7 @@ def vaccination_strategy(tag, abridged_disease_params, patch_populations, sia_bu
     
     # track which clusters have currently registered a detection event
     detections_in_cluster = [False]*n_clusters
-    sia_intervention_used = False
+    sia_intervention_allocated = False
 
     for _ in range(0, num_days):
         # simulate one day of disease evolution
@@ -287,7 +291,7 @@ def vaccination_strategy(tag, abridged_disease_params, patch_populations, sia_bu
         infected = pop_state[3*num_patches:4*num_patches]
 
         # we get one sia per simulation, check if it has been used
-        if not sia_intervention_used:
+        if not sia_intervention_allocated:
             # generate wes data and check for detections
             shedding = exposures + infected
             wes_data = [shedding[i]*scale_factor*rng.uniform(low=unif_low, high=unif_high) for i in range(0, num_patches)]
@@ -307,36 +311,43 @@ def vaccination_strategy(tag, abridged_disease_params, patch_populations, sia_bu
             
             # outbreak has been found, implement selected vaccination strategy
             if len(cluster_indices_with_detections) > 0:
-                sia_intervention_used = True
-                # most of the time this is picking from a list of length one?
-                ground_zero_cluster = np.random.choice(cluster_indices_with_detections)
+                sia_intervention_allocated = True
+                countdown_to_vaccination = detection_day_lag
+                ground_zero_cluster = np.random.choice(cluster_indices_with_detections)  # most of the time this is picking from a list of length one?
 
                 # divide sia budget between patches, using allocation to decide how much goes to ground zero
                 # vs other patches
                 initial_cluster_budget = initial_cluster_allocation*sia_budget
                 other_clusters_budget = (1-initial_cluster_allocation)*sia_budget/(n_clusters-1)
-                
+        
+        # we have started the countdown until the detection is revealed and we act
+        if sia_intervention_allocated:
+            # this should only trigger once
+            if countdown_to_vaccination == 0:
                 # loop over all patches and provide allocated vaccination resources
                 for j in range(0, num_patches):
                     if clusters[j] == ground_zero_cluster:
                         multi_alpha[j] += initial_cluster_budget
                     else:
                         multi_alpha[j] += other_clusters_budget
+            
+            # do this at the end so that of this if statement so that a lag of zero actually means zero
+            countdown_to_vaccination -= 1
     
     track_cumulative_totals = pop_state[4*num_patches:]
     return track_cumulative_totals, clusters
 
 if __name__ == "__main__":
-    tag = "alternative_parameters"
+    tag = "total_population"
     run_through = True
-    cluster_first = False
+    cluster_first = True
 
     # patch connection strengths
-    in_patch = 10**(-1)
-    out_patch = in_patch*10**(-2)
+    in_patch = 10**(-2)
+    out_patch = in_patch*10**(-1)
 
     # cluster information
-    cluster_sizes = [50,50,50,50,50]  # 250 catchment sites in 5 subgroups
+    cluster_sizes = [50]*5  # 250 catchment sites in 5 subgroups
     num_patches = np.sum(cluster_sizes)
     n_clusters = len(cluster_sizes)
 
@@ -346,11 +357,13 @@ if __name__ == "__main__":
     #delta = 0.01
     mu = 0.01
     c = 0.2
-    alpha = 0.05
+    alpha = 0.03
     beta = 0.3/1000
 
     # for monitoring
     detection_threshold = 0.07
+    close_site_frac = 0
+    detect_lag=4
 
     one_patch_number = basic_reproduction_number(alpha, beta, mu, c, gamma, delta, N=1000)
     print(f"R_0 in isolated patch: {one_patch_number}")
@@ -375,7 +388,8 @@ if __name__ == "__main__":
         num_days = 600
         patch_pop = 1000*np.ones(num_patches)
         if cluster_first:
-            clustering_scenario(tag, disease_params, patch_pop, cluster_sizes, unif_low=0.6, unif_high=1, sensitivities=sensitivities, num_days=num_days)
+            clustering_scenario(tag, disease_params, patch_pop, cluster_sizes, unif_low=0.6, unif_high=1,
+                                 sensitivities=sensitivities, num_days=num_days, detection_day_lag=detect_lag)
 
         # generate plots from clustering
         cwd = os.getcwd()
@@ -395,19 +409,24 @@ if __name__ == "__main__":
         #clustering_charts(all_detection_times, cluster_sizes, clusters)
 
         # how many sites are closed
-        operational_surveillance = random_site_closure(clusters, 0.99)
+        operational_surveillance = random_site_closure(clusters, close_site_frac)
 
+        # right now, SIA budget is given in terms of alpha for simplicity. All patches have equal populations (1000), so in terms of daily doses
+        # this is equal to 249*1000*alpha doses for each patch, which is probably a huge overcorrection
         sia_budget = (n_clusters-1)*alpha
+
         with_intervention, clusters = vaccination_strategy(tag, deepcopy(abridged_disease_params), patch_pop, 
                                                         sia_budget, sensitivities=sensitivities, num_days=num_days,
-                                                            initial_cluster_allocation=1, operational_surveillance=operational_surveillance)
+                                                            initial_cluster_allocation=1, operational_surveillance=operational_surveillance,
+                                                            detection_day_lag=detect_lag)
         
         without_intervention, _ = vaccination_strategy(tag, deepcopy(abridged_disease_params), patch_pop, 
-                                                    0, sensitivities=sensitivities, num_days=num_days, operational_surveillance=operational_surveillance)
+                                                    0, sensitivities=sensitivities, num_days=num_days, operational_surveillance=operational_surveillance,
+                                                    detection_day_lag=detect_lag)
         
         spread_intervention, _ = vaccination_strategy(tag, deepcopy(abridged_disease_params), patch_pop,
                                                     sia_budget, initial_cluster_allocation=0, sensitivities=sensitivities, 
-                                                    num_days=num_days, operational_surveillance=operational_surveillance)
+                                                    num_days=num_days, operational_surveillance=operational_surveillance, detection_day_lag=detect_lag)
 
         with_intervention_clustered = np.zeros(n_clusters+1)
         without_intervention_clustered = np.zeros(n_clusters+1)
@@ -423,7 +442,7 @@ if __name__ == "__main__":
 
         # administrative variables for graphing
         originating_cluster = clusters[0]
-        labels = [f"Cluster {j+1}" for j in range(0, n_clusters)]
+        labels = [f"{j+1}" for j in range(0, n_clusters)]
         labels.append("Average")
         height = 1.25*max(without_intervention_clustered)
         bounding_factor = 1.23
