@@ -287,6 +287,7 @@ def vaccination_strategy(tag, abridged_disease_params, patch_populations, sia_bu
     for _ in range(0, num_days):
         # simulate one day of disease evolution
         pop_state = odeint(compartment_rhs_multi_patch, pop_state, [0, 1], args=(disease_params, num_patches, patch_populations))[-1,:]
+        susceptible = pop_state[:num_patches]  # may use to allocate vaccine budget, redundant for now
         exposures = pop_state[2*num_patches:3*num_patches]
         infected = pop_state[3*num_patches:4*num_patches]
 
@@ -322,11 +323,12 @@ def vaccination_strategy(tag, abridged_disease_params, patch_populations, sia_bu
         
         # we have started the countdown until the detection is revealed and we act
         if sia_intervention_allocated:
-            # this should only trigger once
+            # this should only trigger once, implements delay from site sampling to detection announcement
             if countdown_to_vaccination == 0:
                 # loop over all patches and provide allocated vaccination resources
                 for j in range(0, num_patches):
                     if clusters[j] == ground_zero_cluster:
+                        # additional_alpha = initial_cluster_budget/N[j]? or should we account for current demand and divide by susceptible?
                         multi_alpha[j] += initial_cluster_budget
                     else:
                         multi_alpha[j] += other_clusters_budget
