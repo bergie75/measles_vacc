@@ -20,13 +20,14 @@ def find_true(col):
 # define rainfall patterns over course of simulation
 # uses Poisson cluster model, with a matrix to distribute the effects of rainfall
 # greek letters come from the paper I am using as a guide, may not be standard
+# rates should be in days
 def rainfall_realization(storm_arrival_lambda, storm_duration_gamma, cell_arrival_beta, cell_duration_eta, rainfall_intensity,
                           t, geo_connectivity):
-    num_patches = len(storm_arrival_lambda)
+    num_patches = len(storm_arrival_lambda)  # each patch gets its own arrival rate
     num_timepoints = len(t)
 
     # fill with stochastic realizations
-    rainfall = np.zeros(num_patches, num_timepoints)
+    rainfall = np.zeros((num_patches, num_timepoints))
 
     # rate parameter of storm event
     total_storm_lambda = np.sum(storm_arrival_lambda)
@@ -40,27 +41,45 @@ def rainfall_realization(storm_arrival_lambda, storm_duration_gamma, cell_arriva
 
     while current_time < end_time:
         dt = rng.exponential(1/total_storm_lambda)
-        storm_origin_patch = np.random.choice(num_patches, p=storm_patch_probabilities) 
+        storm_origin_patch = np.random.choice(num_patches, p=storm_patch_probabilities)  # independent exponential random variables property
         current_time += dt
-
+        
         initial_cell = Storm_Cell(rainfall_intensity[storm_origin_patch]*rng.uniform(),current_time,
                                   current_time+rng.exponential(1/cell_duration_eta[storm_origin_patch]),
                                   storm_origin_patch)
         cell_list.append(initial_cell)
 
-        # determine number of storm cells
-        num_cells = rng.geometric()
+        # determine number of storm cells, storm duration
+        storm_start_time = current_time
+        storm_end_time = current_time + rng.exponential(1/storm_duration_gamma[storm_origin_patch])
+        cell_geom_prob = storm_duration_gamma[storm_origin_patch]/(storm_duration_gamma[storm_origin_patch]+cell_arrival_beta[storm_origin_patch])
+        num_cells_to_generate = rng.geometric(cell_geom_prob)-1
 
-    for day in t:
-        pass
+        while num_cells_to_generate > 0:
+            # see if this cell arrival is valid, i.e. it occurs before the end of the storm. Otherwise just try again
+            trial_cell_start = rng.exponential(1/cell_arrival_beta[storm_origin_patch]) + storm_start_time
+            if trial_cell_start < storm_end_time:
+                num_cells_to_generate -= 1  # we accept this cell as valid
+                trial_cell_end = trial_cell_start + rng.exponential(1/cell_duration_eta[storm_origin_patch])
+                new_cell = Storm_Cell(rainfall_intensity[storm_origin_patch]*rng.uniform(), trial_cell_start,
+                                      trial_cell_end, storm_origin_patch)
+                cell_list.append(new_cell)
+
+    # sort array based on arrival time of each cell instead of the storm it is part of
+    cell_list.sort(key=lambda x: x.start_time)
+
+    # need to make more efficient if whole method is slow
+    for day_index, day in enumerate(t):
+        for raincell in cell_list:
+            if raincell.start_time <= day <= raincell.end_time:
+                rainfall[raincell.storm_origin, day_index] += raincell.intensity
+    
+    return np.matmul(geo_connectivity, rainfall)  # take geographic structure into account
 
 # E, I, N are patches x timesteps
-def extensive_wes_data(E, I, N, t, gamma, R_0, V_p, kappa=None, rho_max=1):
+def extensive_wes_data(E, I, N, t, gamma, R_0, V_p, rainfall, kappa=None, rho_max=1):
     if kappa is None:
         kappa = -gamma*np.log(1-0.5)
-    
-    # we will generate random rainwater somehow
-    rainfall = 0
 
     # when do we count the disease as appearing in a patch?
     infection_thresholds = I>1
@@ -231,10 +250,11 @@ def vaccination_strategy_extra_doses(tag, abridged_disease_params, patch_populat
     track_cumulative_totals = pop_state[4*num_patches:]
     return track_cumulative_totals, clusters
 
-def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_populations, extra_doses_per_day, sensitivities=0.03, 
-                         num_days=1500, rho_max=4.36*np.log(10),
-                         chosen_patch=0, initial_cluster_allocation=1, operational_surveillance=None, detection_day_lag=0,
-                         days_to_disperse_stockpile=0):
+# maybe make rho_max 4.36*np.log(10)
+def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_populations, extra_doses_per_day, rainfall_matrix,
+                                           sensitivities=0.03, num_days=1500, rho_max=1, V_p=1,
+                                           chosen_patch=0, initial_cluster_allocation=1, operational_surveillance=None, detection_day_lag=0,
+                                           days_to_disperse_stockpile=0):
     
     # find files to load data
     cwd = os.getcwd()
@@ -262,7 +282,7 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
     for j in range(0, num_patches):
         cluster_populations[clusters[j]] += patch_populations[j]
         patches_per_cluster[clusters[j]] += 1
-
+    
     # expand test sensitivities if needed
     if not hasattr(sensitivities, '__iter__'):
         sensitivities = sensitivities*np.ones(num_patches)
@@ -308,8 +328,8 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
         # we get one sia per simulation, check if it has been used
         if not sia_intervention_allocated:
             # generate wes data and check for detections
-            wes_numerator = ((1-np.exp(-R_0*(np.maximum(day-evident_infections_date,0))))*(1-gamma/(gamma+kappa))*exposures+infected)*rho_max
-            wes_data = wes_numerator/patch_populations
+            wes_numerator = ((1-np.exp(-R_0*(np.maximum(day-evident_infections_date,0))))*(1-gamma/(gamma+kappa))*exposures+infected)*rho_max*V_p
+            wes_data = wes_numerator/(patch_populations*V_p+rainfall_matrix[:,day])
             # detections modified to ensure site has been selected to continue functioning
             potential_detections = [(wes >= sensitivities[j]*rho_max) and operational_surveillance[j] for j,wes in enumerate(wes_data)]
 
@@ -382,7 +402,7 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
 if __name__ == "__main__":
     tag = "debugging_improved_wes_model"
     run_through = True
-    cluster_first = False
+    cluster_first = True
 
     # patch connection strengths
     in_patch = 10**(-2)
@@ -403,11 +423,20 @@ if __name__ == "__main__":
     beta = 0.3/1000
 
     # for monitoring
+    num_days = 600
     detection_threshold = 0.07
     site_to_dose_conversion = 70.29
     detect_lag=4
     initial_exposure_patch = 0
     stockpile_dispersal_days = 0
+
+    # calculate a rainfall realization
+    print("Starting rainfall generation")
+    storm_arrival_lambda=1/3*np.ones(num_patches)  # storm happens once per week
+    storm_duration_gamma =24*np.ones(num_patches)  # storm lasts one hour
+    cell_arrival_beta = 96*np.ones(num_patches)  # cell arrives every 15 minutes
+    cell_duration_eta = 96*np.ones(num_patches)
+    rainfall_intensity = 1000*np.array([rng.uniform() for _ in range(0,num_patches)])  # just for testing purposes
 
     one_patch_number = basic_reproduction_number(alpha, beta, mu, c, gamma, delta, N=1000)
     print(f"R_0 in isolated patch: {one_patch_number}")
@@ -435,7 +464,6 @@ if __name__ == "__main__":
             sens_list.extend(sample(base_station_list, k=len(base_station_list)))
         sensitivities = np.array(sens_list)
         
-        num_days = 600
         #patch_pop = 1000*np.ones(num_patches)
         big_pops = [5000,5000,5000,5000,5000]
         big_pops.extend([550]*45)
@@ -477,11 +505,14 @@ if __name__ == "__main__":
 
             for i in range(0, num_samples):
                 print(f"Sample number: {i}")
+                if i%5 == 0:
+                    rainfall_matrix = rainfall_realization(storm_arrival_lambda, storm_duration_gamma, cell_arrival_beta, cell_duration_eta, rainfall_intensity, list(range(0,num_days)), np.eye(num_patches))
+                    print("New rainfall generated")
                 #operational_surveillance = random_site_closure(clusters, closure_frac)
                 operational_surveillance = sensitivity_site_closure(clusters, sensitivities, closure_frac)
                 extra_doses = (num_patches-np.sum(operational_surveillance))*site_to_dose_conversion
                 cumulative_case_counts_sample, clusters = vaccination_strategy_better_wes_model(tag, deepcopy(abridged_disease_params), patch_pop, 
-                                                                                           extra_doses, sensitivities=sensitivities, num_days=num_days,
+                                                                                           extra_doses, rainfall_matrix, sensitivities=sensitivities, num_days=num_days,
                                                                                            initial_cluster_allocation=1, operational_surveillance=operational_surveillance,
                                                                                            detection_day_lag=detect_lag, chosen_patch=initial_exposure_patch,
                                                                                            days_to_disperse_stockpile=stockpile_dispersal_days)
