@@ -23,7 +23,7 @@ def find_detection_times(wes_data, timepoints, sensitivities, scale_factor=8.72*
         num_patches = len(sensitivities)
         N=np.ones(num_patches)
     
-    # perform stacking for compatibility with rpevious code, multiply population into sensitivities 
+    # perform stacking for compatibility with previous code, multiply population into sensitivities 
     num_timepoints = len(timepoints)
     scaled_sensitivities = np.vstack([sensitivities*N]*num_timepoints)
     
@@ -166,8 +166,8 @@ def clustering_charts(all_detection_times, cluster_sizes, clusters, cluster_cuto
         for j in range(0, num_patches):
             final_cluster_detections[clusters[j]].extend(detections_start_in_cluster[:,j])
         
-        final_averages = [np.mean(x) for x in final_cluster_detections]
-        final_std = [np.std(x) for x in final_cluster_detections]
+        final_averages = np.array([np.mean(x) for x in final_cluster_detections])
+        final_std = np.array([np.std(x) for x in final_cluster_detections])
         
         # update for next cluster
         lower_index = upper_index
@@ -177,19 +177,21 @@ def clustering_charts(all_detection_times, cluster_sizes, clusters, cluster_cuto
         plt.errorbar([j+1 for j in range(0, n_clusters)], final_averages, yerr=final_std, capsize=6, color="black", linestyle='', label="Standard dev. of detection time")
         plt.xticks(1+np.arange(n_clusters), labels)
         plt.ylabel("Detection time (days)")
+        plt.xlabel("Cluster")
         plt.ylim([0, height])
         plt.legend()
         plt.show()
 
 def clustering_scenario(tag, disease_params, patch_populations, cluster_sizes, unif_low=0.6, unif_high=1, sensitivities=0.03, num_days=1500,
-                        minimum=0, scale_factor=8.72*np.log(10), detection_day_lag=0):
+                        minimum=0, scale_factor=8.72*np.log(10), detection_day_lag=0, show_graph=False, n_clusters=None):
     # unpack useful variables
     multi_alpha, multi_beta, multi_mu, _, _, _ = disease_params
     num_patches = np.sum(cluster_sizes)
     num_timepoints=num_days+1
     timepoints = np.linspace(0,num_days,num_timepoints)
     all_detection_times = np.zeros((num_patches, num_patches))
-    n_clusters = len(cluster_sizes)
+    if n_clusters == None:
+        n_clusters = len(cluster_sizes)
     
     # expand test sensitivities. If scalar given, all sensitivities are the same. If vector, then sensitivity varies by catchment
     if not hasattr(sensitivities, '__iter__'):
@@ -226,7 +228,8 @@ def clustering_scenario(tag, disease_params, patch_populations, cluster_sizes, u
     #cluster_accuracy(learned_clusters, cluster_sizes)
 
     # plot detection times within and between clusters
-    clustering_charts(all_detection_times, cluster_sizes, learned_clusters)
+    if show_graph:
+        clustering_charts(all_detection_times, cluster_sizes, learned_clusters)
     
     # create save directory
     cwd = os.getcwd()
