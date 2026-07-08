@@ -136,7 +136,7 @@ def vaccination_strategy_extra_doses(tag, abridged_disease_params, patch_populat
     # find files to load data
 
     script_dir = Path(__file__).resolve().parent
-    save_folder = script_dir / "sigma=0.001, omega=0.001 data" / tag
+    save_folder = script_dir / "sigma=0.00001, omega=0.1 test data" / tag
     save_folder.mkdir(parents=True, exist_ok=True)
     
     clusters_file = os.path.join(str(save_folder), "clusters.npy")
@@ -170,6 +170,7 @@ def vaccination_strategy_extra_doses(tag, abridged_disease_params, patch_populat
     # prepapre the initial state for the simulation
     pop_state = np.zeros(6*num_patches)
     pop_state[:num_patches] = (multi_mu/(multi_mu+multi_alpha))*patch_populations
+    pop_state[num_patches:2*num_patches] = (multi_alpha/(multi_mu+multi_alpha))*patch_populations
     frac_exposed = 0.01*pop_state[chosen_patch]
     pop_state[chosen_patch] -= frac_exposed
     pop_state[3*num_patches+chosen_patch] += frac_exposed  # place patients in exposed state
@@ -271,7 +272,7 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
     
     # find files to load data
     script_dir = Path(__file__).resolve().parent
-    save_folder = script_dir / "sigma=0.001, omega=0.001 data" / tag
+    save_folder = script_dir / "sigma=0.00001, omega=0.1 test data" / tag
     
     clusters_file = os.path.join(str(save_folder), "clusters.npy")
     beta_file = os.path.join(str(save_folder), "beta.npy")
@@ -316,6 +317,7 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
     # prepapre the initial state for the simulation
     pop_state = np.zeros(6*num_patches)
     pop_state[:num_patches] = (multi_mu/(multi_mu+multi_alpha))*patch_populations
+    pop_state[num_patches:2*num_patches] = (multi_alpha/(multi_mu+multi_alpha))*patch_populations
     frac_exposed = 0.01*pop_state[chosen_patch]
     pop_state[chosen_patch] -= frac_exposed
     pop_state[3*num_patches+chosen_patch] += frac_exposed  # place patients in exposed state
@@ -430,7 +432,7 @@ if __name__ == "__main__":
     cluster_first = True
 
     script_dir = Path(__file__).resolve().parent
-    save_folder = script_dir / "sigma=0.001, omega=0.001 data" / tag
+    save_folder = script_dir / "sigma=0.00001, omega=0.1 test data" / tag
     save_folder.mkdir(parents=True, exist_ok=True)
     save_folder_str = str(save_folder)
 
@@ -451,8 +453,8 @@ if __name__ == "__main__":
     c = 0.2
     alpha = 0.03
     beta = 0.15/1000 #how likely is an infected person to spread the disease to someone else
-    omega = 0.001
-    sigma=0.001
+    omega = 0.1
+    sigma=0.00001
 
     # for monitoring
     num_days = 600
@@ -599,7 +601,7 @@ if __name__ == "__main__":
         plt.ylim([0, height])
         plt.xlabel("Site closure fraction")
         plt.ylabel("Cumulative case count")
-        plt.title("Cumlative case count sigma=0.00005, omega=0.00005")
+        plt.title("Cumlative case count sigma=0.00001, omega=0.1 test")
         plt.figtext(0.15, 0.8, f"R0: {round(one_patch_number,3)}", 
             bbox=dict(facecolor='white', alpha=0.8, edgecolor='gray'))
         plt.figtext(0.30, 0.8, f"min frac:{min_frac[0]}", 
@@ -650,19 +652,11 @@ plt.grid(True)
 plt.legend()
 plt.show()
 #%%
-SO_0_00005_day=np.load("/Users/timaa/Desktop/OHT 2026/surveillance trade offs python/sigma=0.00005, omega=0.00005 data/debugging_improved_wes_model/first_detection_days.npy")
-SO_0_0001_day=np.load("/Users/timaa/Desktop/OHT 2026/surveillance trade offs python/sigma=0.0001, omega=0.0001 data/debugging_improved_wes_model/first_detection_days.npy")
-SO_0_001_day=np.load("/Users/timaa/Desktop/OHT 2026/surveillance trade offs python/sigma=0.001, omega=0.001 data/debugging_improved_wes_model/first_detection_days.npy")
-SO_0_1_day=np.load("/Users/timaa/Desktop/OHT 2026/surveillance trade offs python/sigma=0.1, omega=0.1 data/debugging_improved_wes_model/first_detection_days.npy")
-SO_0_8_day=np.load("/Users/timaa/Desktop/OHT 2026/surveillance trade offs python/sigma=0.8, omega=0.8 data/debugging_improved_wes_model/first_detection_days.npy")
-SO_1_day=np.load("/Users/timaa/Desktop/OHT 2026/surveillance trade offs python/sigma=1, omega=1 data/debugging_improved_wes_model/first_detection_days.npy")
+O_0_1_day=np.load("/Users/timaa/Desktop/OHT 2026/surveillance trade offs python/sigma=0.00001, omega=0.1 data/debugging_improved_wes_model/first_detection_days.npy")
+O_0_5_day=np.load("/Users/timaa/Desktop/OHT 2026/surveillance trade offs python/sigma=0.00001, omega=0.5 data/debugging_improved_wes_model/first_detection_days.npy")
 
-SO_0_00005_patch=np.load("/Users/timaa/Desktop/OHT 2026/surveillance trade offs python/sigma=0.00005, omega=0.00005 data/debugging_improved_wes_model/first_detection_patches.npy")
-SO_0_0001_patch=np.load("/Users/timaa/Desktop/OHT 2026/surveillance trade offs python/sigma=0.0001, omega=0.0001 data/debugging_improved_wes_model/first_detection_patches.npy")
-SO_0_001_patch=np.load("/Users/timaa/Desktop/OHT 2026/surveillance trade offs python/sigma=0.001, omega=0.001 data/debugging_improved_wes_model/first_detection_patches.npy")
-SO_0_1_patch=np.load("/Users/timaa/Desktop/OHT 2026/surveillance trade offs python/sigma=0.1, omega=0.1 data/debugging_improved_wes_model/first_detection_patches.npy")
-SO_0_8_patch=np.load("/Users/timaa/Desktop/OHT 2026/surveillance trade offs python/sigma=0.8, omega=0.8 data/debugging_improved_wes_model/first_detection_patches.npy")
-SO_1_patch=np.load("/Users/timaa/Desktop/OHT 2026/surveillance trade offs python/sigma=1, omega=1 data/debugging_improved_wes_model/first_detection_patches.npy")
+O_0_1_patch=np.load("/Users/timaa/Desktop/OHT 2026/surveillance trade offs python/sigma=0.00001, omega=0.1 data/debugging_improved_wes_model/first_detection_patches.npy")
+O_0_5_patch=np.load("/Users/timaa/Desktop/OHT 2026/surveillance trade offs python/sigma=0.00001, omega=0.5 data/debugging_improved_wes_model/first_detection_patches.npy")
 
 def hist_day_and_patch(day,patch,intensity):
     
@@ -691,42 +685,42 @@ def hist_day_and_patch(day,patch,intensity):
     
     frac_idx = np.where(np.isclose(closure_fracs, target_frac))[0][0]
     
-    fig, axes = plt.subplots(3, 2, figsize=(10, 8), sharey=True)
+    fig, axes = plt.subplots(3, 2, figsize=(14, 8), sharey=True)
 
     axes[0, 0].hist(day[0], bins=25, color='skyblue', edgecolor='black')
     axes[0, 0].set_xlim(-1,300)
-    axes[0, 0].set_title(f"sigma and omega {intensity} first infection day frac 0.0")
+    axes[0, 0].set_title(f"sigma 0.00005 and omega {intensity} first infection day frac 0.0")
     axes[0, 0].set_xlabel('day')
     
     axes[0, 1].hist(patch[0], bins=25, color='salmon', edgecolor='black')
     axes[0, 1].set_xlim(-1,300)
-    axes[0, 1].set_title(f"sigma and omega {intensity} first infection patch frac 0.0")
+    axes[0, 1].set_title(f"sigma 0.00005 and omega {intensity} first infection patch frac 0.0")
     axes[0, 1].set_xlabel('patch')
     
     axes[1, 0].hist(day[35], bins=25, color='skyblue', edgecolor='black')
     axes[1, 0].set_xlim(-1,300)
-    axes[1, 0].set_title(f"sigma and omega {intensity} first infection day frac 0.99")
+    axes[1, 0].set_title(f"sigma 0.00005 and omega {intensity} first infection day frac 0.99")
     axes[1, 0].set_xlabel('day')
     
     axes[1, 1].hist(patch[35], bins=25, color='salmon', edgecolor='black')
     axes[1, 1].set_xlim(-1,300)
-    axes[1, 1].set_title(f"sigma and omega {intensity} first infection patch frac 0.99")
+    axes[1, 1].set_title(f"sigma 0.00005 and omega {intensity} first infection patch frac 0.99")
     axes[1, 1].set_xlabel('patch')
 
     axes[2, 0].hist(day[frac_idx], bins=25, color='skyblue', edgecolor='black')
     axes[2, 0].set_xlim(-1,300)
-    axes[2, 0].set_title(f"sigma and omega {intensity} first infection day frac min ({target_frac:.4f})")
+    axes[2, 0].set_title(f"sigma 0.00005 and omega {intensity} first infection day frac min ({target_frac:.4f})")
     axes[2, 0].set_xlabel('day')
     
     axes[2, 1].hist(patch[frac_idx], bins=25, color='salmon', edgecolor='black')
     axes[2, 1].set_xlim(-1,300)
-    axes[2, 1].set_title(f"sigma and omega {intensity} first infection patch frac min ({target_frac:.4f})")
+    axes[2, 1].set_title(f"sigma 0.00005 and omega {intensity} first infection patch frac min ({target_frac:.4f})")
     axes[2, 1].set_xlabel('patch')
 
     plt.tight_layout()
     plt.show()
     
-hist_day_and_patch(SO_1_day, SO_1_patch, 1)   
+hist_day_and_patch(O_0_5_day, O_0_5_patch, 0.5)   
 
 #%%
 
