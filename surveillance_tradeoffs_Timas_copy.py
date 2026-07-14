@@ -76,29 +76,22 @@ def rainfall_realization(storm_arrival_lambda, storm_duration_gamma, cell_arriva
 
     # Tima's modification to the rain realization code 
     for raincell in cell_list:
-
+        
         start_idx = max(0, int(raincell.start_time))  
         end_idx = min(num_timepoints - 1, int(raincell.end_time))
+        
+        if start_idx==end_idx:
+
+            rainfall[raincell.storm_origin,start_idx] += raincell.intensity*(raincell.end_time-raincell.start_time)
     
-        if start_idx <= end_idx:
-            rainfall[raincell.storm_origin, start_idx : end_idx + 1] += raincell.intensity
+        else:
+            
+            rainfall[raincell.storm_origin,start_idx] += raincell.intensity*(ceil(raincell.start_time)-raincell.start_time)
+            rainfall[raincell.storm_origin,end_idx] += raincell.intensity*(raincell.end_time-ceil(raincell.start_time))
+
     
     return np.matmul(geo_connectivity, rainfall)  # take geographic structure into account
 
-# E, I, N are patches x timesteps
-def extensive_wes_data(E, I, N, t, gamma, R_0, V_p, rainfall, kappa=None, rho_max=1):
-    if kappa is None:
-        kappa = -gamma*np.log(1-0.5)
-
-    # when do we count the disease as appearing in a patch?
-    infection_thresholds = I>1
-    disease_arrival_days = np.array([t[index] for index in np.apply_along_axis(find_true,0,infection_thresholds)])  # disease has arrived first day there is 1 whole infection
-    
-    shedding_numerator = ((1-np.exp(-R_0*(max(t-disease_arrival_days,0))))*(1-gamma/(gamma+kappa))*E+I)*rho_max*V_p
-    total_water_denominator = N*V_p+rainfall
-    shedding_fractions = shedding_numerator/total_water_denominator
-    
-    return np.array(shedding_fractions)
 
 def sensitivity_site_closure(clusters, sensitivities, closure_perc):
     # extract total patch numbers and cluster information
@@ -128,141 +121,6 @@ def sensitivity_site_closure(clusters, sensitivities, closure_perc):
     
     return operational_surveillance
 
-def vaccination_strategy_extra_doses(tag, abridged_disease_params, patch_populations, extra_doses_per_day, unif_low=0.6, unif_high=1, sensitivities=0.03, 
-                         num_days=1500, scale_factor=8.72*np.log(10),
-                         chosen_patch=0, initial_cluster_allocation=1, operational_surveillance=None, detection_day_lag=0,
-                         days_to_disperse_stockpile=0):
-    
-    # find files to load data
-
-    script_dir = Path(__file__).resolve().parent
-    save_folder = script_dir / "sigma=0.00001, omega=0.1 test data" / tag
-    save_folder.mkdir(parents=True, exist_ok=True)
-    
-    clusters_file = os.path.join(str(save_folder), "clusters.npy")
-    beta_file = os.path.join(str(save_folder), "beta.npy")
-
-    # load pre-existing results
-    clusters = np.load(clusters_file)
-    n_clusters = len(set(clusters))  # how many non-duplicated cluster labels are present
-    num_patches = len(clusters)
-    multi_beta = np.load(beta_file)
-
-    # compute population in each cluster
-    cluster_populations = np.zeros(n_clusters)
-    patches_per_cluster = np.zeros(n_clusters)
-    for j in range(0, num_patches):
-        cluster_populations[clusters[j]] += patch_populations[j]
-        patches_per_cluster[clusters[j]] += 1
-
-    # expand test sensitivities if needed
-    if not hasattr(sensitivities, '__iter__'):
-        sensitivities = sensitivities*np.ones(num_patches)
-    
-    # if no site closures specified, assume all WES sites are operational
-    if operational_surveillance is None:
-        operational_surveillance = [True]*num_patches
-
-    # combine preloaded beta with other disease parameters
-    multi_alpha, multi_mu, multi_c, multi_gamma, multi_delta, multi_sigma, multi_omega = abridged_disease_params
-    disease_params = [multi_alpha, multi_beta, multi_mu, multi_c, multi_gamma, multi_delta, multi_sigma, multi_omega]
-    
-    # prepapre the initial state for the simulation
-    pop_state = np.zeros(6*num_patches)
-    pop_state[:num_patches] = (multi_mu/(multi_mu+multi_alpha))*patch_populations
-    pop_state[num_patches:2*num_patches] = (multi_alpha/(multi_mu+multi_alpha))*patch_populations
-    frac_exposed = 0.01*pop_state[chosen_patch]
-    pop_state[chosen_patch] -= frac_exposed
-    pop_state[3*num_patches+chosen_patch] += frac_exposed  # place patients in exposed state
-    track_cumulative_totals = np.zeros(num_patches)
-    
-    # track which clusters have currently registered a detection event
-    detections_in_cluster = [False]*n_clusters
-    sia_intervention_allocated = False
-    stockpile_days = None  # need to do this to avoid non-assignment area later down
-
-    for day in range(0, num_days):
-        # simulate one day of disease evolution
-        pop_state = odeint(compartment_rhs_multi_patch, pop_state, [0, 1], args=(disease_params, num_patches, patch_populations))[-1,:]
-        susceptible = pop_state[:num_patches]               # This is S1
-        waned_susceptible = pop_state[num_patches:2*num_patches] # This is S2
-        vaccinated = pop_state[2*num_patches:3*num_patches] # This is V
-        exposures = pop_state[3*num_patches:4*num_patches]  # This is E
-        infected = pop_state[4*num_patches:5*num_patches]
-
-        # we get one sia per simulation, check if it has been used
-        if not sia_intervention_allocated:
-            # generate wes data and check for detections
-            shedding = exposures + infected
-            wes_data = [shedding[i]*scale_factor*rng.uniform(low=unif_low, high=unif_high) for i in range(0, num_patches)]
-            # detections modified to ensure site has been selected to continue functioning
-            potential_detections = [(wes >= patch_populations[j]*sensitivities[j]*scale_factor) and operational_surveillance[j] for j,wes in enumerate(wes_data)]
-
-            # update cluster detection tracking
-            for j,detection_status in enumerate(potential_detections):
-                detections_in_cluster[clusters[j]] = detections_in_cluster[clusters[j]] or detection_status
-            
-            # select all detection events to use as a potential initial location for outbreak
-            # multiple can occur simultaneously
-            cluster_indices_with_detections = []
-            for j,detected_in_cluster in enumerate(detections_in_cluster):
-                if detected_in_cluster:
-                    cluster_indices_with_detections.append(j)
-            
-            # outbreak has been found, implement selected vaccination strategy
-            if len(cluster_indices_with_detections) > 0:
-                sia_intervention_allocated = True
-                countdown_to_vaccination = detection_day_lag
-                ground_zero_cluster = np.random.choice(cluster_indices_with_detections)  # most of the time this is picking from a list of length one?
-
-                # this code is to determine how many vaccine doses we have stockpiled based on our initial closings, which we can use
-                # "immediately"
-                stockpiled_doses = day*extra_doses_per_day
-                stockpiled_per_patch = stockpiled_doses/patches_per_cluster[ground_zero_cluster]
-                if days_to_disperse_stockpile == 0:
-                    stockpiled_per_patch_per_day = 0
-                else:
-                    stockpiled_per_patch_per_day = stockpiled_per_patch/days_to_disperse_stockpile
-                
-                # divide sia budget between patches, using allocation to decide how much goes to ground zero
-                # vs other patches
-                initial_cluster_budget = initial_cluster_allocation*extra_doses_per_day
-                other_clusters_budget = (1-initial_cluster_allocation)*extra_doses_per_day
-
-                # useful variables to divide resources within patches
-                cluster_populations = np.zeros(n_clusters)
-                for j in range(0, num_patches):
-                    cluster_populations[clusters[j]] += patch_populations[j]
-        
-        # we have started the countdown until the detection is revealed and we act
-        if sia_intervention_allocated:
-            # this should only trigger once, implements delay from site sampling to detection announcement
-            if countdown_to_vaccination == 0:
-                # begin dispersing the emergency stockpile
-                stockpile_days = days_to_disperse_stockpile
-                # loop over all patches and provide allocated vaccination resources
-                non_origin_total_pop = np.sum(cluster_populations)-cluster_populations[ground_zero_cluster]
-                for j in range(0, num_patches):
-                    if clusters[j] == ground_zero_cluster:
-                        additional_alpha = initial_cluster_budget/cluster_populations[ground_zero_cluster]  # distribute according to population size
-                        multi_alpha[j] += additional_alpha
-                    else:
-                        additional_alpha = other_clusters_budget/non_origin_total_pop
-                        multi_alpha[j] += additional_alpha
-            
-            # do this at the end so that of this if statement so that a lag of zero actually means zero
-            countdown_to_vaccination -= 1
-        
-        # we get to use our built-up stockpile of vaccines over a very short number of days, unless we have disabled this mode
-        # by setting the number of days to disperse our stockpile to zero
-        if (stockpile_days is not None) and stockpile_days > 0:
-            stockpile_days -= 1
-            for j in range(0, num_patches):
-                if clusters[j] == ground_zero_cluster:
-                    susceptible[j] -= min(stockpiled_per_patch_per_day, susceptible[j])
-    
-    track_cumulative_totals = pop_state[4*num_patches:]
-    return track_cumulative_totals, clusters
 
 # maybe make rho_max 4.36*np.log(10)
 def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_populations, extra_doses_per_day, rainfall_matrix,
@@ -272,7 +130,7 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
     
     # find files to load data
     script_dir = Path(__file__).resolve().parent
-    save_folder = script_dir / "sigma=0.00001, omega=0.1 test data" / tag
+    save_folder = script_dir / "new rainfall test data" / tag
     
     clusters_file = os.path.join(str(save_folder), "clusters.npy")
     beta_file = os.path.join(str(save_folder), "beta.npy")
@@ -317,7 +175,8 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
     # prepapre the initial state for the simulation
     pop_state = np.zeros(6*num_patches)
     pop_state[:num_patches] = (multi_mu/(multi_mu+multi_alpha))*patch_populations
-    pop_state[num_patches:2*num_patches] = (multi_alpha/(multi_mu+multi_alpha))*patch_populations
+    pop_state[num_patches:2*num_patches] = ((multi_alpha*multi_omega)/((multi_mu+multi_alpha)*(multi_mu+multi_omega)))*patch_populations
+    pop_state[2*num_patches:3*num_patches] = ((multi_alpha*multi_mu)/((multi_mu+multi_alpha)*(multi_mu+multi_omega)))*patch_populations
     frac_exposed = 0.01*pop_state[chosen_patch]
     pop_state[chosen_patch] -= frac_exposed
     pop_state[3*num_patches+chosen_patch] += frac_exposed  # place patients in exposed state
@@ -432,7 +291,7 @@ if __name__ == "__main__":
     cluster_first = True
 
     script_dir = Path(__file__).resolve().parent
-    save_folder = script_dir / "sigma=0.00001, omega=0.1 test data" / tag
+    save_folder = script_dir / "new rainfall test data" / tag
     save_folder.mkdir(parents=True, exist_ok=True)
     save_folder_str = str(save_folder)
 
@@ -453,8 +312,8 @@ if __name__ == "__main__":
     c = 0.2
     alpha = 0.03
     beta = 0.15/1000 #how likely is an infected person to spread the disease to someone else
-    omega = 0.1
-    sigma=0.00001
+    omega = 0.0001
+    sigma=0.0001
 
     # for monitoring
     num_days = 600
@@ -601,7 +460,7 @@ if __name__ == "__main__":
         plt.ylim([0, height])
         plt.xlabel("Site closure fraction")
         plt.ylabel("Cumulative case count")
-        plt.title("Cumlative case count sigma=0.00001, omega=0.1 test")
+        plt.title("Cumlative case count new rainfall test")
         plt.figtext(0.15, 0.8, f"R0: {round(one_patch_number,3)}", 
             bbox=dict(facecolor='white', alpha=0.8, edgecolor='gray'))
         plt.figtext(0.30, 0.8, f"min frac:{min_frac[0]}", 
@@ -722,7 +581,7 @@ def hist_day_and_patch(day,patch,intensity):
     
 hist_day_and_patch(O_0_5_day, O_0_5_patch, 0.5)   
 
-#%%
+#%% Creating a table of most common first day detection days
 
 RI_500=pd.read_csv("/Users/timaa/Desktop/OHT 2026/surveillance trade offs python/RI 500 days and patches.csv", index_col=0)
 
