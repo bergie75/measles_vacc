@@ -5,6 +5,7 @@ import random
 from pathlib import Path
 import numpy as np
 import pandas as pd
+import math
 
 random.seed(42) #not needed but added to compare with other code templates
  
@@ -86,8 +87,8 @@ def rainfall_realization(storm_arrival_lambda, storm_duration_gamma, cell_arriva
     
         else:
             
-            rainfall[raincell.storm_origin,start_idx] += raincell.intensity*(ceil(raincell.start_time)-raincell.start_time)
-            rainfall[raincell.storm_origin,end_idx] += raincell.intensity*(raincell.end_time-ceil(raincell.start_time))
+            rainfall[raincell.storm_origin,start_idx] += raincell.intensity*(math.ceil(raincell.start_time)-raincell.start_time)
+            rainfall[raincell.storm_origin,end_idx] += raincell.intensity*(raincell.end_time-math.ceil(raincell.start_time))
 
     
     return np.matmul(geo_connectivity, rainfall)  # take geographic structure into account
