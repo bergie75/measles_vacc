@@ -19,13 +19,14 @@ def vaccination_strategy_control_group(abridged_disease_params, patch_population
     base_alpha = np.copy(base_alpha) 
 
     # Prepare the initial state for the simulation
-    pop_state = np.zeros(6 * num_patches)
-    pop_state[:num_patches] = (multi_mu / (multi_mu + base_alpha)) * patch_populations
-    
-    # Seed the outbreak
-    frac_exposed = 0.01 * pop_state[chosen_patch]
+    pop_state = np.zeros(6*num_patches)
+    pop_state[:num_patches] = (multi_mu/(multi_mu+base_alpha))*patch_populations
+    pop_state[num_patches:2*num_patches] = ((base_alpha*multi_omega)/((multi_mu+base_alpha)*(multi_mu+multi_omega)))*patch_populations
+    pop_state[2*num_patches:3*num_patches] = ((base_alpha*multi_mu)/((multi_mu+base_alpha)*(multi_mu+multi_omega)))*patch_populations
+    frac_exposed = 0.01*pop_state[chosen_patch]
     pop_state[chosen_patch] -= frac_exposed
-    pop_state[3 * num_patches + chosen_patch] += frac_exposed
+    pop_state[3*num_patches+chosen_patch] += frac_exposed
+
 
     # Main daily epidemic simulation loop
     for day in range(0, num_days):
@@ -67,8 +68,8 @@ if __name__ == "__main__":
     c = 0.2
     alpha = 0.03
     beta = 0.15 / 1000 
-    omega = 1
-    sigma = 1
+    omega = 0.01
+    sigma = 0.01
     num_days = 600
     initial_exposure_patch = 0
     
@@ -120,6 +121,6 @@ if __name__ == "__main__":
     print(f"Total number of people infected by Day {num_days}: {total_infected_population:.2f}")
     
     # Save your results matrix cleanly
-    save_folder = script_dir / "sigma=1, omega=1 data control_group"
+    save_folder = script_dir / "sigma=0.0001, omega=0.0001 data control_group"
     save_folder.mkdir(parents=True, exist_ok=True)
     np.save(os.path.join(str(save_folder), "control_total_cases.npy"), total_control_case_counts)
