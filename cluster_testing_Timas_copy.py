@@ -12,13 +12,6 @@ from pathlib import Path
 
 rng = np.random.default_rng()
 
-def make_true_cluster_vec(cluster_sizes):
-    true_cluster_vec = []
-    for i, cluster_size in enumerate(cluster_sizes):
-        true_cluster_vec.extend([i]*cluster_size)
-    
-    return true_cluster_vec
-
 def find_detection_times(wes_data, timepoints, sensitivities, scale_factor=8.72*np.log(10), N=None, detection_day_lag=0):
     if N is None:
         num_patches = len(sensitivities)
@@ -99,6 +92,33 @@ def transmission_matrix(raw_beta, cluster_sizes, in_cluster_strength=0.5, out_cl
     waifw_matrix = raw_beta*(np.eye(num_patches) + upper_triangle + np.transpose(upper_triangle))
     return waifw_matrix
 
+def transmission_matrix_realworld_inter(raw_beta, adjacent_matrix, in_cluster_strength=0.5, out_cluster_strength=0.01, connect_to_frac=1):
+    # recreate number of patches
+    num_patches = len(adjacent_matrix)
+    cluster_sizes= adjacent_matrix['Cluster'].value_counts() 
+    # we will recursively grow this array
+    upper_triangle = np.zeros((num_patches, num_patches))
+    starting_index = 0
+
+    # create rows one by one, transpose for symmetry
+    for cluster_size in cluster_sizes:
+        for i in range(starting_index, starting_index+cluster_size):
+            # in cluster entries, on the block diagonal
+            for j in range(i+1, starting_index+cluster_size):
+                u = rng.uniform()
+                if u >= 1-connect_to_frac:
+                    upper_triangle[i,j] = in_cluster_strength*rng.uniform()
+            # out of cluster entries that come after the block diagonal
+            for j in range(starting_index+cluster_size, num_patches):
+                u = rng.uniform()
+                if u >= 1-connect_to_frac:
+                    upper_triangle[i,j] = out_cluster_strength*rng.uniform()
+        
+        starting_index += cluster_size
+    
+    waifw_matrix = raw_beta*(np.eye(num_patches) + upper_triangle + np.transpose(upper_triangle))
+    return waifw_matrix
+
 def compartment_rhs_multi_patch(x, t, disease_params, num_patches, N):
     # if population sizes are not specified, assume fractions
     if N is None:
@@ -117,7 +137,7 @@ def compartment_rhs_multi_patch(x, t, disease_params, num_patches, N):
     # sigma: relative susceptibility/breakthrough factor for vaccinated individuals
     alpha, beta, mu, c, gamma, delta, omega, sigma= disease_params
 
-    dS1_dt = mu*(N-S1)-alpha*S1-np.matmul(beta,(c*E+I))*S1 #mu*(N-S) represents birth kinus death rate
+    dS1_dt = mu*(N-S1)-alpha*S1-np.matmul(beta,(c*E+I))*S1 #mu*(N-S) represents birth minus death rate
     dS2_dt = omega*V-np.matmul(beta,(c*E+I))*S2 - mu*S2    #beta is a big matrix that specifies how patches are interacting
     dV_dt = alpha * S1 - omega * V - sigma * np.matmul(beta,(c*E+I)) * V - mu * V                    # with each other, mu*V are people dying while vaccinated            
     dE_dt = np.matmul(beta,(c*E+I))*S1+np.matmul(beta,(c*E+I))*S2 + (sigma*np.matmul(beta,(c*E+I))*V) - (mu+gamma)*E     
@@ -126,78 +146,15 @@ def compartment_rhs_multi_patch(x, t, disease_params, num_patches, N):
     
     return np.concatenate([dS1_dt, dS2_dt, dV_dt, dE_dt, dI_dt, dcum_cases_dt])
 
-def cluster_accuracy(clusters, cluster_sizes):
-    # this should probably just be called a confusion matrix. Measures how close clusters are to underlying
-    # construction of transmission matrix
-    n_clusters = len(set(clusters))
-    true_clusters = np.array(make_true_cluster_vec(cluster_sizes))
-
-    commonality_matrix = np.zeros((n_clusters, n_clusters))
-    for i,pred_cluster in enumerate(clusters):
-        commonality_matrix[pred_cluster, true_clusters[i]] += 1
-    
-    # attempt to put dominant terms on diagonal
-    permutation = np.zeros((n_clusters, n_clusters))
-    for i in range(0, n_clusters):
-        j=np.argmax(commonality_matrix[i,:])
-        permutation[j,i]=1
-    
-    # check for collisions and abort attempt to reorganize matrix if these occur
-    valid_permutation = False
-    for j in range(0, n_clusters):
-        col_check = (np.sum(permutation[:,j]) == 1)
-        valid_permutation = (valid_permutation or col_check)
-    
-    if valid_permutation:
-        commonality_matrix = np.matmul(commonality_matrix, permutation)
-    
-    sns.heatmap(commonality_matrix, xticklabels=False, yticklabels=[f"Cluster {j+1}" for j in range(0, n_clusters)])
-    plt.show()
-
-def clustering_charts(all_detection_times, cluster_sizes, clusters, cluster_cutoff=1):
-        # plot detection times within and between clusters
-    lower_index = 0
-    n_clusters = len(cluster_sizes)
-    num_patches = np.sum(cluster_sizes)
-    
-    # don't alwats show every possibility
-    if cluster_cutoff is None:
-        display_clusters = cluster_sizes
-    else:
-        display_clusters = cluster_sizes[:cluster_cutoff]
-    for cluster_size in display_clusters:
-        final_cluster_detections = [[] for _ in range(0, n_clusters)]
-        upper_index = lower_index + cluster_size
-        detections_start_in_cluster = all_detection_times[lower_index:upper_index,:]
-        for j in range(0, num_patches):
-            final_cluster_detections[clusters[j]].extend(detections_start_in_cluster[:,j])
-        
-        final_averages = np.array([np.mean(x) for x in final_cluster_detections])
-        final_std = np.array([np.std(x) for x in final_cluster_detections])
-        
-        # update for next cluster
-        lower_index = upper_index
-        height = max(final_averages+final_std)*1.1
-        labels = [f"{j+1}" for j in range(0, n_clusters)]
-        plt.bar([j+1 for j in range(0, n_clusters)], final_averages, label="Average detection time")
-        plt.errorbar([j+1 for j in range(0, n_clusters)], final_averages, yerr=final_std, capsize=6, color="black", linestyle='', label="Standard dev. of detection time")
-        plt.xticks(1+np.arange(n_clusters), labels)
-        plt.ylabel("Detection time (days)")
-        plt.xlabel("Cluster")
-        plt.ylim([0, height])
-        plt.legend()
-        plt.show()
 
 def clustering_scenario(tag, disease_params, patch_populations, cluster_sizes, unif_low=0.6, unif_high=1, sensitivities=0.03, num_days=1500,
-                        minimum=0, scale_factor=8.72*np.log(10), detection_day_lag=0, show_graph=False, n_clusters=None):
+                        minimum=0, scale_factor=8.72*np.log(10), detection_day_lag=0):
     # unpack useful variables
     multi_alpha, multi_beta, multi_mu, multi_c, multi_gamma, multi_delta, multi_omega, multi_sigma= disease_params
-    num_patches = np.sum(cluster_sizes)
+    num_patches = len(patch_populations)
     num_timepoints=num_days+1
     timepoints = np.linspace(0,num_days,num_timepoints)
     all_detection_times = np.zeros((num_patches, num_patches))
-    if n_clusters == None:
-        n_clusters = len(cluster_sizes)
     
     # expand test sensitivities. If scalar given, all sensitivities are the same. If vector, then sensitivity varies by catchment
     if not hasattr(sensitivities, '__iter__'):
@@ -225,20 +182,10 @@ def clustering_scenario(tag, disease_params, patch_populations, cluster_sizes, u
         # compute when disease is actually found in wastewater
         all_detection_times[chosen_patch,:] = find_detection_times(wes_data, timepoints, sensitivities, 
                                                                    scale_factor=scale_factor, N=patch_populations, detection_day_lag=detection_day_lag)
-    
-    # from wastewater data alone, attempt to cluster the catchment areas
-    agg = KMeans(n_clusters=n_clusters)
-    learned_clusters = np.array(agg.fit_predict(all_detection_times))
 
-    #cluster_accuracy(learned_clusters, cluster_sizes)
-
-    # plot detection times within and between clusters
-    if show_graph:
-        clustering_charts(all_detection_times, cluster_sizes, learned_clusters)
-    
     # create save directory
     script_dir = Path(__file__).resolve().parent
-    save_folder = script_dir / "sigma=0.001, omega=0.001 data" / tag
+    save_folder = script_dir / "SA-lambda=1_9, RI=52500.52 data test" / tag
     save_folder.mkdir(parents=True, exist_ok=True)
     
     # save found clusters, detection times, and transmission matrix. The latter is saved because it is stochastic
@@ -247,7 +194,7 @@ def clustering_scenario(tag, disease_params, patch_populations, cluster_sizes, u
     clusters_file = os.path.join(save_folder, "clusters.npy")
     beta_file = os.path.join(save_folder, "beta.npy")
     np.save(detection_time_file, all_detection_times)
-    np.save(clusters_file, np.array(learned_clusters))
+    np.save(clusters_file, np.array(clusters))
     np.save(beta_file, multi_beta)
 
 def vaccination_strategy(tag, abridged_disease_params, patch_populations, sia_budget, unif_low=0.6, unif_high=1, sensitivities=0.03, 
