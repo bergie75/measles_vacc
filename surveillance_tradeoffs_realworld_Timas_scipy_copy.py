@@ -1,4 +1,4 @@
-from cluster_testing_Timas_copy import *
+from cluster_testing_Timas_scipy_copy import *
 from random import sample
 from numpy.linalg import eig
 import random
@@ -25,6 +25,9 @@ def find_true(col):
     except:
         return len(col)-1
 
+print("[SETUP] Starting file loading and preprocessing...")
+setup_start = time.perf_counter()
+
 file_name = "kentucky-counties-by-population-(2026).xlsx"
 df = pd.read_excel(file_name)
 
@@ -50,12 +53,18 @@ adjacent_matrix = pd.read_csv(
 
 adjacent_matrix = adjacent_matrix.set_index("Unnamed: 0")
 
+print(f"[SETUP] Task completed in {time.perf_counter() - setup_start:.4f} seconds.")
+
 # define rainfall patterns over course of simulation
 # uses Poisson cluster model, with a matrix to distribute the effects of rainfall
 # greek letters come from the paper I am using as a guide, may not be standard
 # rates should be in days
 def rainfall_realization(storm_arrival_lambda, storm_duration_gamma, cell_arrival_beta, cell_duration_eta, rainfall_intensity,
                           t, geo_connectivity):
+    
+    print("  [RAINFALL] Starting rainfall realization generation...")
+    func_start = time.perf_counter()
+    
     num_patches = len(storm_arrival_lambda)  # each patch gets its own arrival rate
     num_timepoints = len(t)
 
@@ -116,12 +125,13 @@ def rainfall_realization(storm_arrival_lambda, storm_duration_gamma, cell_arriva
             rainfall[raincell.storm_origin,start_idx] += raincell.intensity*(math.ceil(raincell.start_time)-raincell.start_time)
             rainfall[raincell.storm_origin,end_idx] += raincell.intensity*(raincell.end_time-math.ceil(raincell.start_time))
 
-    
+    result = np.matmul(geo_connectivity, rainfall)
+    print(f"  [RAINFALL] Task completed in {time.perf_counter() - func_start:.4f} seconds.")
     return np.matmul(geo_connectivity, rainfall)  # take geographic structure into account
 
 
 def sensitivity_site_closure(df, sensitivities, closure_perc):
-
+    func_start = time.perf_counter()
     num_patches = len(df)
     n_clusters = df["Cluster"].nunique()
 
@@ -194,19 +204,8 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
                                            chosen_patch=0, initial_cluster_allocation=1, operational_surveillance=None, detection_day_lag=0,
                                            days_to_disperse_stockpile=0, multi_beta=1):
     
-    
-    # Initialize timing tracking variables to default 0.0
-    execution_time_computing_population_FL=0.0 
-    execution_time_R_0=0.0  
-    execution_time_pop_state=0.0  
-    execution_time_evident_infections_date_FL=0.0  
-    execution_time_potential_detections_FL=0.0 
-    execution_time_detections_in_cluster_FL=0.0  
-    execution_time_cluster_indices_with_detections_FL=0.0  
-    execution_time_ground_zero_cluster=0.0 
-    execution_time_budget_divide_FL=0.0  
-    execution_time_vaccination_resource_FL=0.0  
-    execution_time_stockpile_susceptible_FL=0.0 
+    sim_start_time = time.perf_counter()
+    print("    [SIMULATION] Starting vaccination_strategy_better_wes_model simulation...")
     
     # find files to load data
     script_dir = Path(__file__).resolve().parent
@@ -220,15 +219,9 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
     cluster_populations = np.zeros(n_clusters)
     patches_per_cluster = np.zeros(n_clusters)
     
-    start_time_computing_population_FL = time.perf_counter()
-    
     for j in range(0, num_patches):
         cluster_populations[clusters[j]] += patch_populations[j]
         patches_per_cluster[clusters[j]] += 1
-    
-    end_time_computing_population_FL = time.perf_counter()
-    
-    execution_time_computing_population_FL = end_time_computing_population_FL - start_time_computing_population_FL
     
     # expand test sensitivities if needed
     if not hasattr(sensitivities, '__iter__'):
@@ -243,14 +236,8 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
     disease_params = [multi_alpha, multi_beta, multi_mu, multi_c, multi_gamma, multi_delta, multi_omega, multi_sigma]
 
     # calculate basic reproduction number
-    
-    start_time_R_0 = time.perf_counter()
-    
+
     R_0=calculate_patch_R0(patch_populations, disease_params, multi_beta)
-    
-    end_time_R_0 = time.perf_counter()
-    
-    execution_time_R_0 = end_time_R_0 - start_time_R_0
     
     #print(f"Basic reproduction number: {R_0:.3f}")
     
@@ -274,31 +261,26 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
     first_detection_day = None
     first_detection_patch = None    
 
+    ode_total_time = 0.0
+
     for day in range(0, num_days):
         # simulate one day of disease evolution
-        start_time_pop_state = time.perf_counter()
-        
+        if day % 100 == 0 or day == num_days - 1:
+            print(f"      [SIMULATION] Processing Day {day}/{num_days}...")
+
+        t_ode_start = time.perf_counter()
         pop_state = odeint(compartment_rhs_multi_patch, pop_state, [0, 1], args=(disease_params, num_patches, patch_populations))[-1,:]
-       
-        end_time_pop_state = time.perf_counter()
-        
-        execution_time_pop_state = end_time_pop_state - start_time_pop_state
-        
+        ode_total_time += (time.perf_counter() - t_ode_start)
+    
         susceptible = pop_state[:num_patches]               # This is S1
         waned_susceptible = pop_state[num_patches:2*num_patches] # This is S2
         vaccinated = pop_state[2*num_patches:3*num_patches] # This is V
         exposures = pop_state[3*num_patches:4*num_patches]  # This is E
         infected = pop_state[4*num_patches:5*num_patches]
 
-        start_time_evident_infections_date_FL = time.perf_counter()
-
         for i,date in enumerate(evident_infections_date):
             if not np.isfinite(date) and infected[i]>=1: #we are checking if there are any cases of infection
                 evident_infections_date[i] = day #if true, the date of that day is stored
-
-        end_time_evident_infections_date_FL = time.perf_counter()
-        
-        execution_time_evident_infections_date_FL = end_time_evident_infections_date_FL - start_time_evident_infections_date_FL
 
         # we get one sia per simulation, check if it has been used
         if not sia_intervention_allocated:
@@ -307,14 +289,8 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
             wes_data = wes_numerator/(patch_populations*V_p+rainfall_matrix[:,day])
             # rho_max is the maximam amount that an exposed person could shed RNA into the water
             # detections modified to ensure site has been selected to continue functioning
-            
-            start_time_potential_detections_FL = time.perf_counter()
-            
-            potential_detections = [(wes >= sensitivities[j]*rho_max) and operational_surveillance[j] for j,wes in enumerate(wes_data)]
 
-            end_time_potential_detections_FL = time.perf_counter()
-            
-            execution_time_potential_detections_FL = end_time_potential_detections_FL - start_time_potential_detections_FL
+            potential_detections = [(wes >= sensitivities[j]*rho_max) and operational_surveillance[j] for j,wes in enumerate(wes_data)]
 
             if any(potential_detections) and first_detection_day is None:
                 # Find the index of the first patch that triggered the detection
@@ -322,43 +298,24 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
                 first_detection_day = day
 
             # update cluster detection tracking
-            
-            start_time_detections_in_cluster_FL = time.perf_counter()
-            
+
             for j,detection_status in enumerate(potential_detections):
                 detections_in_cluster[clusters[j]] = detections_in_cluster[clusters[j]] or detection_status
-            
-            end_time_detections_in_cluster_FL = time.perf_counter()
-            
-            execution_time_detections_in_cluster_FL = end_time_detections_in_cluster_FL - start_time_detections_in_cluster_FL            
-            
-            
+
             # select all detection events to use as a potential initial location for outbreak
             # multiple can occur simultaneously
             cluster_indices_with_detections = []
-            
-            start_time_cluster_indices_with_detections_FL = time.perf_counter()
-            
+
             for j,detected_in_cluster in enumerate(detections_in_cluster):
                 if detected_in_cluster:
                     cluster_indices_with_detections.append(j)
-           
-            end_time_cluster_indices_with_detections_FL = time.perf_counter()
-            
-            execution_time_cluster_indices_with_detections_FL = end_time_cluster_indices_with_detections_FL - start_time_cluster_indices_with_detections_FL 
-            
+
             # outbreak has been found, implement selected vaccination strategy
             if len(cluster_indices_with_detections) > 0:
                 sia_intervention_allocated = True
                 countdown_to_vaccination = detection_day_lag
-                
-                start_time_ground_zero_cluster = time.perf_counter()
-                
-                ground_zero_cluster = np.random.choice(cluster_indices_with_detections)  # most of the time this is picking from a list of length one?
 
-                end_time_ground_zero_cluster= time.perf_counter()
-                
-                execution_time_ground_zero_cluster = end_time_ground_zero_cluster - start_time_ground_zero_cluster
+                ground_zero_cluster = np.random.choice(cluster_indices_with_detections)  # most of the time this is picking from a list of length one?
 
                 # this code is to determine how many vaccine doses we have stockpiled based on our initial closings, which we can use
                 # "immediately"
@@ -376,16 +333,10 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
 
                 # useful variables to divide resources within patches
                 cluster_populations = np.zeros(n_clusters)
-                
-                start_time_budget_divide_FL = time.perf_counter()
-                
+
                 for j in range(0, num_patches):
                     cluster_populations[clusters[j]] += patch_populations[j]
-                
-                end_time_budget_divide_FL = time.perf_counter()
-                
-                execution_time_budget_divide_FL = end_time_budget_divide_FL - start_time_budget_divide_FL
-        
+
         # we have started the countdown until the detection is revealed and we act
         if sia_intervention_allocated:
             # this should only trigger once, implements delay from site sampling to detection announcement
@@ -394,9 +345,7 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
                 stockpile_days = days_to_disperse_stockpile
                 # loop over all patches and provide allocated vaccination resources
                 non_origin_total_pop = np.sum(cluster_populations)-cluster_populations[ground_zero_cluster]
-                
-                start_time_vaccination_resources_FL = time.perf_counter()
-                
+
                 for j in range(0, num_patches):
                     if clusters[j] == ground_zero_cluster:
                         additional_alpha = initial_cluster_budget/cluster_populations[ground_zero_cluster]  # distribute according to population size
@@ -404,50 +353,31 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
                     else:
                         additional_alpha = other_clusters_budget/non_origin_total_pop
                         multi_alpha[j] += additional_alpha
-                
-                end_time_vaccination_resource_FL = time.perf_counter()
-                
-                execution_time_vaccination_resource_FL = end_time_vaccination_resource_FL - start_time_vaccination_resources_FL
-                
+
             # do this at the end so that of this if statement so that a lag of zero actually means zero
             countdown_to_vaccination -= 1
         
         # we get to use our built-up stockpile of vaccines over a very short number of days, unless we have disabled this mode
         # by setting the number of days to disperse our stockpile to zero
         if (stockpile_days is not None) and stockpile_days > 0:
-            stockpile_days -= 1
-            
-            start_time_stockpile_susceptible_FL = time.perf_counter()
-            
+
             for j in range(0, num_patches):
                 if clusters[j] == ground_zero_cluster:
                     susceptible[j] -= min(stockpiled_per_patch_per_day, susceptible[j])
-            
-            end_time_stockpile_susceptible_FL = time.perf_counter()
-            
-            execution_time_stockpile_susceptible_FL = end_time_stockpile_susceptible_FL - start_time_stockpile_susceptible_FL
-            
+
     track_cumulative_totals = pop_state[5*num_patches:]
-    return (
-        track_cumulative_totals, 
-        clusters, 
-        first_detection_day, 
-        first_detection_patch, 
-        execution_time_computing_population_FL, 
-        execution_time_R_0, 
-        execution_time_pop_state, 
-        execution_time_evident_infections_date_FL, 
-        execution_time_potential_detections_FL,
-        execution_time_detections_in_cluster_FL, 
-        execution_time_cluster_indices_with_detections_FL, 
-        execution_time_ground_zero_cluster,
-        execution_time_budget_divide_FL, 
-        execution_time_vaccination_resource_FL, 
-        execution_time_stockpile_susceptible_FL
-    )
+    
+    total_time = time.perf_counter() - sim_start_time
+    print(f"    [SIMULATION] Task completed in {total_time:.4f} seconds (ODE integrations took {ode_total_time:.4f}s total).")
+    
+    return track_cumulative_totals, clusters, first_detection_day, first_detection_patch, 
+
 
 def generating_beta_matrix(adj_matrix, raw_beta, in_cluster_strength):
-    
+   
+    print("  [BETA MATRIX] Starting beta matrix generation...")
+    func_start = time.perf_counter() 
+   
     matrix_max = adj_matrix.max() if isinstance(adj_matrix, np.ndarray) else adj_matrix.values.max()
     normalized_matrix= (adj_matrix) / (matrix_max)
 
@@ -495,6 +425,7 @@ def generating_beta_matrix(adj_matrix, raw_beta, in_cluster_strength):
     
     beta_matrix=matrix_split*raw_beta
     
+    print(f"  [BETA MATRIX] Task completed in {time.perf_counter() - func_start:.4f} seconds.")
     return(beta_matrix)
 
 if __name__ == "__main__":
@@ -528,11 +459,11 @@ if __name__ == "__main__":
     sigma=0.0001
 
     # for monitoring
-    num_days = 1
+    num_days = 600
     detection_threshold = 0.07
     site_to_dose_conversion = 70.29
     detect_lag=4
-    initial_exposure_patch = 0
+    initial_exposure_patch = rng.choice(range(0, len(realworld_example)-1))
     stockpile_dispersal_days = 0
 
     # calculate a rainfall realization
@@ -581,8 +512,8 @@ if __name__ == "__main__":
 
         num_patches = len(clusters)
 
-        closure_fracs = [0.00]
-        num_samples = 1
+        closure_fracs = np.linspace(0.00, 0.99, 36)
+        num_samples = 250
         #The sample number is how many times we simulate the disease spread for each scenario where we close some number of wastewater surveillance sites
         closure_scenario_case_counts = np.zeros(len(closure_fracs))
         all_detection_days = np.zeros((len(closure_fracs), num_samples))
@@ -608,37 +539,10 @@ if __name__ == "__main__":
 
                 extra_doses = (num_patches-np.sum(operational_surveillance))*site_to_dose_conversion
                
-                (
-                    cumulative_case_counts_sample, 
-                    clusters, 
-                    det_day, 
-                    det_patch, 
-                    execution_time_computing_population_FL, 
-                    execution_time_R_0, 
-                    execution_time_pop_state, 
-                    execution_time_evident_infections_date_FL, 
-                    execution_time_potential_detections_FL,
-                    execution_time_detections_in_cluster_FL, 
-                    execution_time_cluster_indices_with_detections_FL, 
-                    execution_time_ground_zero_cluster,
-                    execution_time_budget_divide_FL, 
-                    execution_time_vaccination_resource_FL, 
-                    execution_time_stockpile_susceptible_FL
-                ) = vaccination_strategy_better_wes_model(
-                    tag, 
-                    deepcopy(abridged_disease_params), 
-                    patch_pop, 
-                    extra_doses, 
-                    rainfall_matrix, 
-                    sensitivities=sensitivities, 
-                    num_days=num_days,
-                    initial_cluster_allocation=1, 
-                    operational_surveillance=operational_surveillance, 
-                    detection_day_lag=detect_lag, 
-                    chosen_patch=initial_exposure_patch, 
-                    days_to_disperse_stockpile=stockpile_dispersal_days, 
-                    multi_beta=multi_beta
-                )
+                cumulative_case_counts_sample, clusters, det_day, det_patch, = vaccination_strategy_better_wes_model(
+                    tag, deepcopy(abridged_disease_params), patch_pop, extra_doses, rainfall_matrix, sensitivities=sensitivities, 
+                    num_days=num_days, initial_cluster_allocation=1, operational_surveillance=operational_surveillance, detection_day_lag=detect_lag, 
+                    chosen_patch=initial_exposure_patch, days_to_disperse_stockpile=stockpile_dispersal_days, multi_beta=multi_beta)
                
                 all_detection_days[k, i] = det_day if det_day is not None else -1
                 all_detection_patches[k, i] = det_patch if det_patch is not None else -1
@@ -657,21 +561,7 @@ if __name__ == "__main__":
 
             for j in range(0, num_patches):
                 closure_scenario_case_counts[k] += cumulative_case_counts[j]
-         
-        execution_times= [execution_time_computing_population_FL, execution_time_R_0, execution_time_pop_state, execution_time_evident_infections_date_FL, 
-                          execution_time_potential_detections_FL,execution_time_detections_in_cluster_FL, execution_time_cluster_indices_with_detections_FL, 
-                          execution_time_ground_zero_cluster, execution_time_budget_divide_FL, execution_time_vaccination_resource_FL, execution_time_stockpile_susceptible_FL]
-        
-        execution_time_names=["computing population for loop", "R0", "ODE", "time evident infection date for loop", "potential detection for loop", "detection in clutser for loop", 
-                              "cluster with detection in indicies for loop", "ground zero cluster", "budget divide for loop", "vaccination resource for loop", "stockpile susceptible for loop"]
-        
-        data = {
-            "function in vaccination strategy better wes model": execution_time_names,
-            "excution time": execution_times,
-        }
-        
-        ET_table = pd.DataFrame(data)
-#%%
+
         # save results to retrieve later
         np.save(closure_file, closure_scenario_case_counts)
 

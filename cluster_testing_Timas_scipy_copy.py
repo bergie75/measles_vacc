@@ -139,7 +139,7 @@ def compartment_rhs_multi_patch(x, t, disease_params, num_patches, N):
     dS1_dt = mu*(N-S1)-alpha*S1-force_of_infection*S1 #mu*(N-S) represents birth minus death rate
     dS2_dt = omega*V - force_of_infection*S2 - mu*S2    #beta is a big matrix that specifies how patches are interacting
     dV_dt = alpha * S1 - omega * V - sigma * force_of_infection * V - mu * V                    # with each other, mu*V are people dying while vaccinated            
-    dE_dt = np.matmul(beta,(c*E+I))*(S1+S2+sigma*V)    
+    dE_dt = force_of_infection*(S1+S2+sigma*V)    
     dI_dt = gamma*E-(mu+delta)*I
     dcum_cases_dt = I #keep tracking of the cumulative case count
     
