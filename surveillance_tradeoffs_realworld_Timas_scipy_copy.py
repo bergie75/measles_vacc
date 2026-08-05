@@ -211,9 +211,13 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
     script_dir = Path(__file__).resolve().parent
     save_folder = script_dir / "test 2" / tag
 
+    # combine preloaded beta with other disease parameters
+    multi_alpha, multi_mu, multi_c, multi_gamma, multi_delta, multi_omega, multi_sigma = deepcopy(abridged_disease_params)
+    disease_params = [multi_alpha, multi_beta, multi_mu, multi_c, multi_gamma, multi_delta, multi_omega, multi_sigma]
+
     # important to ensure this is a numpy array
     patch_populations = np.array(patch_populations)
-    kappa = -gamma*np.log(1-0.5)
+    kappa = -np.mean(multi_gamma)*np.log(1-0.5)
 
     # compute population in each cluster
     cluster_populations = np.zeros(n_clusters)
@@ -230,10 +234,6 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
     # if no site closures specified, assume all WES sites are operational
     if operational_surveillance is None:
         operational_surveillance = [True]*num_patches
-
-    # combine preloaded beta with other disease parameters
-    multi_alpha, multi_mu, multi_c, multi_gamma, multi_delta, multi_omega, multi_sigma = abridged_disease_params
-    disease_params = [multi_alpha, multi_beta, multi_mu, multi_c, multi_gamma, multi_delta, multi_omega, multi_sigma]
 
     # calculate basic reproduction number
 
@@ -356,6 +356,7 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
                     if clusters[j] == ground_zero_cluster:
                         additional_alpha = initial_cluster_budget/cluster_populations[ground_zero_cluster]  # distribute according to population size
                         multi_alpha[j] += additional_alpha
+                        additional_alpha_tracked[j] += additional_alpha
                     else:
                         additional_alpha = other_clusters_budget/non_origin_total_pop
                         multi_alpha[j] += additional_alpha
