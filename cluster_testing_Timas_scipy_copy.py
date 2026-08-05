@@ -9,6 +9,7 @@ import os
 import time
 from copy import deepcopy
 from pathlib import Path
+from scipy import stats
 
 rng = np.random.default_rng()
 
@@ -139,7 +140,7 @@ def compartment_rhs_multi_patch(x, t, disease_params, num_patches, N):
     dS1_dt = mu*(N-S1)-alpha*S1-force_of_infection*S1 #mu*(N-S) represents birth minus death rate
     dS2_dt = omega*V - force_of_infection*S2 - mu*S2    #beta is a big matrix that specifies how patches are interacting
     dV_dt = alpha * S1 - omega * V - sigma * force_of_infection * V - mu * V                    # with each other, mu*V are people dying while vaccinated            
-    dE_dt = force_of_infection*(S1+S2+sigma*V)    
+    dE_dt = force_of_infection*(S1+S2+sigma*V)-mu*E- gamma*E
     dI_dt = gamma*E-(mu+delta)*I
     dcum_cases_dt = I #keep tracking of the cumulative case count
     
@@ -184,7 +185,7 @@ def clustering_scenario(tag, disease_params, patch_populations, cluster_sizes, u
 
     # create save directory
     script_dir = Path(__file__).resolve().parent
-    save_folder = script_dir / "test" / tag
+    save_folder = script_dir / "test 2" / tag
     save_folder.mkdir(parents=True, exist_ok=True)
     
     # save found clusters, detection times, and transmission matrix. The latter is saved because it is stochastic
