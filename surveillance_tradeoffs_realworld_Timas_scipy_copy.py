@@ -28,7 +28,7 @@ def find_true(col):
 print("[SETUP] Starting file loading and preprocessing...")
 setup_start = time.perf_counter()
 
-file_name = "kentucky-counties-by-population-(2026).xlsx"
+file_name = "kentucky-counties-by-population-(2026) all Ys.xlsx"
 df = pd.read_excel(file_name)
 
 # Normalize column names
@@ -357,10 +357,12 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
                         additional_alpha = initial_cluster_budget/cluster_populations[ground_zero_cluster]  # distribute according to population size
                         multi_alpha[j] += additional_alpha
                         additional_alpha_tracked[j] += additional_alpha
+
                     else:
                         additional_alpha = other_clusters_budget/non_origin_total_pop
                         multi_alpha[j] += additional_alpha
                         additional_alpha_tracked[j] += additional_alpha
+                    
 
             # do this at the end so that of this if statement so that a lag of zero actually means zero
             countdown_to_vaccination -= 1
@@ -377,24 +379,8 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
     
     total_time = time.perf_counter() - sim_start_time
     
-    avg_ode_time = np.mean(ode_daily_times)
-    median_ode_time = np.median(ode_daily_times)
-    mode_ode_time = stats.mode(ode_daily_times, keepdims=True).mode[0]
-    std_ode_time = np.std(ode_daily_times)
-    max_ode_time = np.max(ode_daily_times)
-    min_ode_time = np.min(ode_daily_times)
-
-    print("\n    " + "="*55)
-    print("    [ODE SOLVER RUNTIME SUMMARY STATISTICS]")
-    print(f"      Average (Mean):     {avg_ode_time:.6f} s")
-    print(f"      Median:             {median_ode_time:.6f} s")
-    print(f"      Mode:               {mode_ode_time:.6f} s")
-    print(f"      Standard Deviation: {std_ode_time:.6f} s")
-    print(f"      Maximum:            {max_ode_time:.6f} s")
-    print(f"      Minimum:            {min_ode_time:.6f} s")
-    print("    " + "="*55 + "\n")
-    
-    print(f"    [SIMULATION] Task completed in {total_time:.4f} seconds.")    
+    print(f"    [SIMULATION] Task completed in {total_time:.4f} seconds.") 
+                    
     return track_cumulative_totals, clusters, first_detection_day, first_detection_patch, additional_alpha_tracked
 
 
@@ -488,7 +474,6 @@ if __name__ == "__main__":
     detection_threshold = 0.07
     site_to_dose_conversion = 70.29
     detect_lag=4
-    initial_exposure_patch = rng.choice(range(0, len(realworld_example)-1))
     stockpile_dispersal_days = 0
 
     # calculate a rainfall realization
@@ -572,14 +557,18 @@ if __name__ == "__main__":
             closure_cluster_vax_sums = np.zeros(n_clusters)
             
             for i in range(0, num_samples):
+                initial_exposure_patch = rng.choice(range(0, len(realworld_example)-1))
                 print(f"Sample number: {i}")
                 
                 #operational_surveillance = random_site_closure(clusters, closure_frac)
                 operational_surveillance = sensitivity_site_closure(realworld_example, sensitivities, closure_frac)
 
                 num_closed_sites = initial_operational_count - np.sum(operational_surveillance)
+                
+                print(f"number of closed sites:{num_closed_sites}")
+                
                 extra_doses = num_closed_sites * site_to_dose_conversion
-               
+                
                 cumulative_case_counts_sample, clusters, det_day, det_patch, add_alpha = vaccination_strategy_better_wes_model(
                     tag, deepcopy(abridged_disease_params), patch_pop, extra_doses, rainfall_matrix, sensitivities=sensitivities, 
                     num_days=num_days, initial_cluster_allocation=1, operational_surveillance=operational_surveillance, detection_day_lag=detect_lag, 
@@ -588,6 +577,8 @@ if __name__ == "__main__":
                 all_detection_days[k, i] = det_day if det_day is not None else -1
                 all_detection_patches[k, i] = det_patch if det_patch is not None else -1
                 all_additional_alphas[k, i, :] = add_alpha
+                
+                
                 
                 for patch_idx in range(num_patches):
                     cluster_id = clusters[patch_idx]
