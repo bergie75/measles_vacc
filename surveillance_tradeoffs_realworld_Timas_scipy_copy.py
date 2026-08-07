@@ -28,7 +28,7 @@ def find_true(col):
 print("[SETUP] Starting file loading and preprocessing...")
 setup_start = time.perf_counter()
 
-file_name = "kentucky-counties-by-population-(2026) all Ys.xlsx"
+file_name = "kentucky-counties-by-population-(2026).xlsx"
 df = pd.read_excel(file_name)
 
 # Normalize column names
@@ -211,13 +211,9 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
     script_dir = Path(__file__).resolve().parent
     save_folder = script_dir / "test 2" / tag
 
-    # combine preloaded beta with other disease parameters
-    multi_alpha, multi_mu, multi_c, multi_gamma, multi_delta, multi_omega, multi_sigma = deepcopy(abridged_disease_params)
-    disease_params = [multi_alpha, multi_beta, multi_mu, multi_c, multi_gamma, multi_delta, multi_omega, multi_sigma]
-
     # important to ensure this is a numpy array
     patch_populations = np.array(patch_populations)
-    kappa = -np.mean(multi_gamma)*np.log(1-0.5)
+    kappa = -gamma*np.log(1-0.5)
 
     # compute population in each cluster
     cluster_populations = np.zeros(n_clusters)
@@ -234,6 +230,10 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
     # if no site closures specified, assume all WES sites are operational
     if operational_surveillance is None:
         operational_surveillance = [True]*num_patches
+
+    # combine preloaded beta with other disease parameters
+    multi_alpha, multi_mu, multi_c, multi_gamma, multi_delta, multi_omega, multi_sigma = abridged_disease_params
+    disease_params = [multi_alpha, multi_beta, multi_mu, multi_c, multi_gamma, multi_delta, multi_omega, multi_sigma]
 
     # calculate basic reproduction number
 
@@ -356,13 +356,10 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
                     if clusters[j] == ground_zero_cluster:
                         additional_alpha = initial_cluster_budget/cluster_populations[ground_zero_cluster]  # distribute according to population size
                         multi_alpha[j] += additional_alpha
-                        additional_alpha_tracked[j] += additional_alpha
-
                     else:
                         additional_alpha = other_clusters_budget/non_origin_total_pop
                         multi_alpha[j] += additional_alpha
                         additional_alpha_tracked[j] += additional_alpha
-                    
 
             # do this at the end so that of this if statement so that a lag of zero actually means zero
             countdown_to_vaccination -= 1
@@ -379,8 +376,24 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
     
     total_time = time.perf_counter() - sim_start_time
     
-    print(f"    [SIMULATION] Task completed in {total_time:.4f} seconds.") 
-                    
+    avg_ode_time = np.mean(ode_daily_times)
+    median_ode_time = np.median(ode_daily_times)
+    mode_ode_time = stats.mode(ode_daily_times, keepdims=True).mode[0]
+    std_ode_time = np.std(ode_daily_times)
+    max_ode_time = np.max(ode_daily_times)
+    min_ode_time = np.min(ode_daily_times)
+
+    print("\n    " + "="*55)
+    print("    [ODE SOLVER RUNTIME SUMMARY STATISTICS]")
+    print(f"      Average (Mean):     {avg_ode_time:.6f} s")
+    print(f"      Median:             {median_ode_time:.6f} s")
+    print(f"      Mode:               {mode_ode_time:.6f} s")
+    print(f"      Standard Deviation: {std_ode_time:.6f} s")
+    print(f"      Maximum:            {max_ode_time:.6f} s")
+    print(f"      Minimum:            {min_ode_time:.6f} s")
+    print("    " + "="*55 + "\n")
+    
+    print(f"    [SIMULATION] Task completed in {total_time:.4f} seconds.")    
     return track_cumulative_totals, clusters, first_detection_day, first_detection_patch, additional_alpha_tracked
 
 
@@ -474,6 +487,7 @@ if __name__ == "__main__":
     detection_threshold = 0.07
     site_to_dose_conversion = 70.29
     detect_lag=4
+    initial_exposure_patch = rng.choice(range(0, len(realworld_example)-1))
     stockpile_dispersal_days = 0
 
     # calculate a rainfall realization
@@ -539,8 +553,6 @@ if __name__ == "__main__":
         
         most_vaccinated_clusters = []
         
-        initial_operational_count = np.sum(realworld_operational_surveillance)
-        
         for k,closure_frac in enumerate(closure_fracs):
             # how many sites are closed
             #operational_surveillance = random_site_closure(clusters, closure_frac)
@@ -557,18 +569,13 @@ if __name__ == "__main__":
             closure_cluster_vax_sums = np.zeros(n_clusters)
             
             for i in range(0, num_samples):
-                initial_exposure_patch = rng.choice(range(0, len(realworld_example)-1))
                 print(f"Sample number: {i}")
                 
                 #operational_surveillance = random_site_closure(clusters, closure_frac)
                 operational_surveillance = sensitivity_site_closure(realworld_example, sensitivities, closure_frac)
 
-                num_closed_sites = initial_operational_count - np.sum(operational_surveillance)
-                
-                print(f"number of closed sites:{num_closed_sites}")
-                
-                extra_doses = num_closed_sites * site_to_dose_conversion
-                
+                extra_doses = (num_patches-np.sum(operational_surveillance))*site_to_dose_conversion
+               
                 cumulative_case_counts_sample, clusters, det_day, det_patch, add_alpha = vaccination_strategy_better_wes_model(
                     tag, deepcopy(abridged_disease_params), patch_pop, extra_doses, rainfall_matrix, sensitivities=sensitivities, 
                     num_days=num_days, initial_cluster_allocation=1, operational_surveillance=operational_surveillance, detection_day_lag=detect_lag, 
@@ -577,8 +584,6 @@ if __name__ == "__main__":
                 all_detection_days[k, i] = det_day if det_day is not None else -1
                 all_detection_patches[k, i] = det_patch if det_patch is not None else -1
                 all_additional_alphas[k, i, :] = add_alpha
-                
-                
                 
                 for patch_idx in range(num_patches):
                     cluster_id = clusters[patch_idx]
@@ -596,12 +601,12 @@ if __name__ == "__main__":
             for j in range(0, num_patches):
                 closure_scenario_case_counts[k] += cumulative_case_counts[j]
 
-            top_cluster = np.argmax(closure_cluster_vax_sums)
-            most_vaccinated_clusters.append({
-                'closure_fraction': closure_frac,
-                'most_vaccinated_cluster': top_cluster,
-                'total_alpha_added_to_cluster': closure_cluster_vax_sums[top_cluster]
-            })
+        top_cluster = np.argmax(closure_cluster_vax_sums)
+        most_vaccinated_clusters.append({
+            'closure_fraction': closure_frac,
+            'most_vaccinated_cluster': top_cluster,
+            'total_alpha_added_to_cluster': closure_cluster_vax_sums[top_cluster]
+        })
 
         # save results to retrieve later
         np.save(closure_file, closure_scenario_case_counts)
@@ -619,9 +624,8 @@ if __name__ == "__main__":
         df_most_vax = pd.DataFrame(most_vaccinated_clusters)
         df_most_vax.to_csv(most_vax_cluster_file, index=False)
 
-        min_cumlative = min(closure_scenario_case_counts)
-        min_idx = np.argmin(closure_scenario_case_counts)
-        min_frac = closure_fracs[min_idx]
+        min_cumlative=min(closure_scenario_case_counts)
+        min_frac= closure_fracs[np.where(closure_scenario_case_counts==min_cumlative)]
 
         # administrative variables for graphing
         originating_cluster = clusters[initial_exposure_patch]
@@ -630,15 +634,15 @@ if __name__ == "__main__":
         bounding_factor = 1.23
         width=0.2
 
-        colors = ['crimson' if i == min_idx else 'skyblue' for i in range(len(closure_fracs))]
+        colors = ['crimson' if i == int(np.where(closure_scenario_case_counts==min_cumlative)[0]) else 'skyblue' for i in range(len(closure_fracs))]
 
         plt.bar(np.arange(len(closure_fracs)), closure_scenario_case_counts, width=width, color=colors)
         plt.xticks(np.arange(len(closure_fracs)), labels, rotation=290)
         plt.ylim([0, height])
         plt.xlabel("Site closure fraction")
         plt.ylabel("Cumulative case count")
-        plt.title("Cumlative Case Count of real-life example")
-        plt.figtext(0.30, 0.8, f"min frac:{min_frac:.4f}", 
+        plt.title("Cumalyive Case Count of real-life example")
+        plt.figtext(0.30, 0.8, f"min frac:{min_frac[0]}", 
             bbox=dict(facecolor='white', alpha=0.8, edgecolor='gray'))
         plt.show()
 #%% Generating a time check plot for rainfall realization 
@@ -811,73 +815,46 @@ row_names = np.round(row_names, 4)
 df.index=row_names
 
 df.to_csv("most common day and patch first infection RI 500.csv")
-#%% Plotting most vaccinated clusters
+#%%
 
-df_most_vax = pd.read_csv("most_vaccinated_cluster_per_closure.csv")
-
-plt.figure(figsize=(14, 6))
-
-unique_clusters = df_most_vax["most_vaccinated_cluster"].unique()
-cmap = plt.cm.get_cmap("tab10", len(unique_clusters))
-cluster_color_map = {
-    cluster: cmap(i) for i, cluster in enumerate(unique_clusters)
-}
-
-bar_colors = [
-    cluster_color_map[c] for c in df_most_vax["most_vaccinated_cluster"]
-]
-
-x_positions = np.arange(len(df_most_vax))
-bars = plt.bar(
-    x_positions,
-    df_most_vax["total_alpha_added_to_cluster"],
-    color=bar_colors,
-    edgecolor="black",
-    width=0.7,
-    alpha=0.85,
-)
+max_vac_clusters = np.load("most_vaccinated_cluster_per_sample.npy")  # Replace with your actual path
 
 
-for bar, cluster_id in zip(bars, df_most_vax["most_vaccinated_cluster"]):
-    height = bar.get_height()
-    plt.text(
-        bar.get_x() + bar.get_width() / 2.0,
-        height + (0.01 * height),
-        f"C{int(cluster_id)}",
-        ha="center",
-        va="bottom",
-        fontsize=8,
-        fontweight="bold",
+def max_vax_cluster_hist(clusters, n_clusters):
+    closure_fracs = np.linspace(0.0, 0.99, 36)
+
+    target_frac = 0.72857
+    frac_idx = np.where(np.isclose(closure_fracs, target_frac))[0][0]
+
+    fig, axes = plt.subplots(3, 1, figsize=(10, 10), sharey=True)
+
+    bins = np.arange(-0.5, n_clusters + 0.5, 1)
+
+    axes[0].hist(clusters[0], bins=bins, color="skyblue", edgecolor="black")
+    axes[0].set_title(f"Kentucky Clusters with Max Vaccination (Closure Frac {closure_fracs[0]:.2f})")
+    axes[0].set_xlabel("Cluster ID")
+    axes[0].set_ylabel("Frequency")
+    axes[0].set_xticks(range(n_clusters))
+
+    axes[1].hist(clusters[35], bins=bins, color="skyblue", edgecolor="black")
+    axes[1].set_title(f"Kentucky Clusters with Max Vaccination (Closure Frac {closure_fracs[35]:.2f})")
+    axes[1].set_xlabel("Cluster ID")
+    axes[1].set_ylabel("Frequency")
+    axes[1].set_xticks(range(n_clusters))
+
+    axes[2].hist(
+        clusters[frac_idx], bins=bins, color="skyblue", edgecolor="black"
     )
+    axes[2].set_title(f"Kentucky Clusters with Max Vaccination (Closure Frac {closure_fracs[frac_idx]:.4f})")
+    axes[2].set_xlabel("Cluster ID")
+    axes[2].set_ylabel("Frequency")
+    axes[2].set_xticks(range(n_clusters))
 
+    plt.tight_layout()
+    plt.show()
 
-x_labels = [f"{f:.2f}" for f in df_most_vax["closure_fraction"]]
-plt.xticks(x_positions, x_labels, rotation=45, fontsize=9)
-
-plt.xlabel("Site Closure Fraction", fontsize=12)
-plt.ylabel(r"Total Additional Vaccination Rate ($\sum\Delta\alpha$)", fontsize=12)
-plt.title(
-    "Maximum Vaccinated Cluster and Total Added Vaccination Across Closure Fractions",
-    fontsize=14,
-    pad=15,
-)
-
-legend_handles = [
-    plt.Rectangle((0, 0), 1, 1, color=cluster_color_map[c], ec="black")
-    for c in unique_clusters
-]
-plt.legend(
-    legend_handles,
-    [f"Cluster {int(c)}" for c in unique_clusters],
-    title="Top Target Cluster",
-    loc="upper right",
-)
-
-plt.grid(axis="y", linestyle="--", alpha=0.5)
-plt.tight_layout()
-plt.show()
-
-#%% Plotting additional alpha
+max_vax_cluster_hist(max_vac_clusters, n_clusters=orig_n_clusters)
+#%%
 
 all_additional_alphas = np.load(
     "test/debugging_improved_wes_model/additional_alpha_per_patch.npy"
