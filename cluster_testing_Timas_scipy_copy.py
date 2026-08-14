@@ -185,7 +185,7 @@ def clustering_scenario(tag, disease_params, patch_populations, cluster_sizes, u
 
     # create save directory
     script_dir = Path(__file__).resolve().parent
-    save_folder = script_dir / "test 2" / tag
+    save_folder = script_dir / "test 3 beta 0.00001, RI=0" / tag
     save_folder.mkdir(parents=True, exist_ok=True)
     
     # save found clusters, detection times, and transmission matrix. The latter is saved because it is stochastic

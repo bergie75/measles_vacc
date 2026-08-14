@@ -209,7 +209,7 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
     
     # find files to load data
     script_dir = Path(__file__).resolve().parent
-    save_folder = script_dir / "test 2 files run" / tag
+    save_folder = script_dir / "test 3 beta 0.00001, RI=0" / tag
 
     # combine preloaded beta with other disease parameters
     multi_alpha, multi_mu, multi_c, multi_gamma, multi_delta, multi_omega, multi_sigma = deepcopy(abridged_disease_params)
@@ -260,7 +260,6 @@ def vaccination_strategy_better_wes_model(tag, abridged_disease_params, patch_po
     # TRACKING VARIABLES FOR DETECTION
     first_detection_day = None
     first_detection_patch = None    
-
 
     # TRACKING ADDITIONAL ALPHA
     additional_alpha_tracked = np.zeros(num_patches)
@@ -444,11 +443,13 @@ if __name__ == "__main__":
     run_through = True
     cluster_first = True
 
-    script_dir = Path(__file__).resolve().parent
-    save_folder = script_dir / "test 2 files run" / tag    
-    print("saved test 2 files run")
+    try:
+        base_dir = Path(__file__).resolve().parent
+    except NameError:
+        base_dir = Path.cwd()
+    
+    save_folder = base_dir / "test 3 beta 0.00001, RI=0" / tag
     save_folder.mkdir(parents=True, exist_ok=True)
-    print("Reached mkdir")
     save_folder_str = str(save_folder)
 
 
@@ -468,14 +469,14 @@ if __name__ == "__main__":
     mu = 0.01
     c = 0.2
     alpha = 0.1
-    beta = 0.15/10000 #how likely is an infected person to spread the disease to someone else
+    beta = 0.1/10000 #how likely is an infected person to spread the disease to someone else
     omega = 0.0001
     sigma=0.0001
 
     # for monitoring
     num_days = 600
     detection_threshold = 0.07
-    site_to_dose_conversion = 70.29
+    site_to_dose_conversion = 7029
     detect_lag=4
     stockpile_dispersal_days = 0
 
@@ -485,7 +486,7 @@ if __name__ == "__main__":
     storm_duration_gamma =24*np.ones(num_patches)  # storm lasts one hour
     cell_arrival_beta = 96*np.ones(num_patches)  # cell arrives every 15 minutes
     cell_duration_eta = 96*np.ones(num_patches)
-    rainfall_intensity = 52500.52*np.ones(num_patches)  # changed from original code
+    rainfall_intensity = 0*np.ones(num_patches)  # changed from original code
 
     if run_through:        
         
@@ -530,7 +531,7 @@ if __name__ == "__main__":
         num_patches = len(clusters)
 
         closure_fracs = np.linspace(0.00, 0.99, 36)
-        num_samples = 1
+        num_samples = 250
         #The sample number is how many times we simulate the disease spread for each scenario where we close some number of wastewater surveillance sites
         closure_scenario_case_counts = np.zeros(len(closure_fracs))
         all_detection_days = np.zeros((len(closure_fracs), num_samples))
@@ -633,7 +634,7 @@ if __name__ == "__main__":
         plt.ylim([0, height])
         plt.xlabel("Site closure fraction")
         plt.ylabel("Cumulative case count")
-        plt.title("Cumlative Case Count of real-life example")
+        plt.title("Cumlative Case Count of real-life example test 3 beta 0.00001, RI=0")
         plt.figtext(0.30, 0.8, f"min frac:{min_frac:.4f}", 
             bbox=dict(facecolor='white', alpha=0.8, edgecolor='gray'))
         plt.show()
@@ -809,7 +810,7 @@ df.index=row_names
 df.to_csv("most common day and patch first infection RI 500.csv")
 #%% Plotting most vaccinated clusters
 
-df_most_vax = pd.read_csv("/Users/timaa/Desktop/OHT 2026/surveillance trade offs python/test 2/debugging_improved_wes_model/most_vaccinated_cluster_per_closure.csv")
+df_most_vax = pd.read_csv("/Users/timaa/Desktop/OHT 2026/surveillance trade offs python/test 3 beta 0.00001, RI=0/debugging_improved_wes_model/most_vaccinated_cluster_per_closure.csv")
 
 plt.figure(figsize=(14, 6))
 
@@ -876,11 +877,13 @@ plt.show()
 #%% Plotting additional alpha
 
 all_additional_alphas = np.load(
-    "test/debugging_improved_wes_model/additional_alpha_per_patch.npy"
+    "test 3 beta 0.00001, RI=0/debugging_improved_wes_model/additional_alpha_per_patch.npy"
 )
 
 closure_fracs = np.linspace(0.00, 0.99, 36)
 frac_idx = min_idx
+
+patch_indices = np.arange(num_patches)
 
 indices_to_compare = [0, frac_idx, 35]  
 labels = [
