@@ -75,7 +75,7 @@ def compartment_rhs_multi_patch(x, t, disease_params, num_patches, N):
     alpha, beta, mu, c, gamma, delta, omega, sigma= disease_params
     
     # useful intermediate variable to improve efficiency
-    force_of_infection = np.matmul(beta,(c*E+I))
+    force_of_infection = np.matmul(beta,(c*E+I)/N)
 
     dS1_dt = mu*(N-S1)-alpha*S1-force_of_infection*S1 #mu*(N-S) represents birth minus death rate
     dS2_dt = omega*V - force_of_infection*S2 - mu*S2    #beta is a big matrix that specifies how patches are interacting
