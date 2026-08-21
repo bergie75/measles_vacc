@@ -214,7 +214,7 @@ def calculate_patch_R0(patch_populations,disease_param, multi_beta):
     
     N = np.array(patch_populations)
 
-    main_diag = np.diag(multi_beta)
+    main_diag = np.diag(multi_beta)/patch_populations
 
     S1_star = (multi_mu * N) / (multi_mu + multi_alpha)
 
